@@ -1142,6 +1142,12 @@ NSString *const errorMethod = @"error";
   [_captureDevice unlockForConfiguration];
 }
 
+- (void)setLensPosition:(double)position {
+  [_captureDevice lockForConfiguration:nil];
+  [_captureDevice setFocusModeLockedWithLensPosition: (float)position completionHandler:nil];
+  [_captureDevice unlockForConfiguration];
+}
+
 - (void)startImageStreamWithMessenger:(NSObject<FlutterBinaryMessenger> *)messenger {
   [self startImageStreamWithMessenger:messenger
                    imageStreamHandler:[[FLTImageStreamHandler alloc]
