@@ -341,6 +341,15 @@ static FlutterError *FlutterErrorFromNSError(NSError *error) {
   });
 }
 
+- (void)setLensPosition:(double)position
+               completion:(nonnull void (^)(FlutterError *_Nullable))completion {
+  __weak typeof(self) weakSelf = self;
+  dispatch_async(self.captureSessionQueue, ^{
+    [weakSelf.camera setLensPosition:position];
+    completion(nil);
+  });
+}
+
 - (void)setFocusMode:(FCPPlatformFocusMode)mode
           completion:(nonnull void (^)(FlutterError *_Nullable))completion {
   __weak typeof(self) weakSelf = self;
