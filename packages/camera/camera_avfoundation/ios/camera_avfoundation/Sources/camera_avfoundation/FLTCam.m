@@ -162,7 +162,9 @@ NSString *const errorMethod = @"error";
                  captureDeviceFactory:(CaptureDeviceFactory)captureDeviceFactory
              videoDimensionsForFormat:(VideoDimensionsForFormat)videoDimensionsForFormat
                                 error:(NSError **)error {
+  NSLog(@"[FLTCam] initWithMediaSettings");
   self = [super init];
+  NSLog(@"[FLTCam] super init");
   NSAssert(self, @"super init cannot be nil");
   _mediaSettings = mediaSettings;
   _mediaSettingsAVWrapper = mediaSettingsAVWrapper;
