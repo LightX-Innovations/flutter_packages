@@ -200,33 +200,33 @@ NSString *const errorMethod = @"error";
     }
     return nil;
   }
-  NSLog(@"[FLTCam] connection: %@", connection)
+  NSLog(@"[FLTCam] connection: %@", connection);
 
   [_videoCaptureSession addInputWithNoConnections:_captureVideoInput];
-  NSLog(@"[FLTCam] addInputWithNoConnections: %@", _captureVideoInput)
+  NSLog(@"[FLTCam] addInputWithNoConnections: %@", _captureVideoInput);
   [_videoCaptureSession addOutputWithNoConnections:_captureVideoOutput];
-  NSLog(@"[FLTCam] addOutputWithNoConnections: %@", _captureVideoOutput)
+  NSLog(@"[FLTCam] addOutputWithNoConnections: %@", _captureVideoOutput);
   [_videoCaptureSession addConnection:connection];
-  NSLog(@"[FLTCam] addConnection: %@", connection)
+  NSLog(@"[FLTCam] addConnection: %@", connection);
 
   _capturePhotoOutput = [AVCapturePhotoOutput new];
-  NSLog(@"[FLTCam] _capturePhotoOutput: %@", _capturePhotoOutput)
+  NSLog(@"[FLTCam] _capturePhotoOutput: %@", _capturePhotoOutput);
   [_capturePhotoOutput setHighResolutionCaptureEnabled:YES];
-  NSLog(@"[FLTCam] setHighResolutionCaptureEnabled: YES")
+  NSLog(@"[FLTCam] setHighResolutionCaptureEnabled: YES");
   [_videoCaptureSession addOutput:_capturePhotoOutput];
-  NSLog(@"[FLTCam] addOutput: %@", _capturePhotoOutput)
+  NSLog(@"[FLTCam] addOutput: %@", _capturePhotoOutput);
 
   _motionManager = [[CMMotionManager alloc] init];
-  NSLog(@"[FLTCam] _motionManager: %@", _motionManager)
+  NSLog(@"[FLTCam] _motionManager: %@", _motionManager);
   [_motionManager startAccelerometerUpdates];
 
   if (_mediaSettings.framesPerSecond) {
     // The frame rate can be changed only on a locked for configuration device.
-    NSLog(@"[FLTCam] _mediaSettings.framesPerSecond: %@", _mediaSettings.framesPerSecond)
+    NSLog(@"[FLTCam] _mediaSettings.framesPerSecond: %@", _mediaSettings.framesPerSecond);
     if ([mediaSettingsAVWrapper lockDevice:_captureDevice error:error]) {
-      NSLog(@"[FLTCam] lockDevice: %@", _captureDevice)
+      NSLog(@"[FLTCam] lockDevice: %@", _captureDevice);
       [_mediaSettingsAVWrapper beginConfigurationForSession:_videoCaptureSession];
-      NSLog(@"[FLTCam] beginConfigurationForSession: %@", _videoCaptureSession)
+      NSLog(@"[FLTCam] beginConfigurationForSession: %@", _videoCaptureSession);
 
       // Possible values for presets are hard-coded in FLT interface having
       // corresponding AVCaptureSessionPreset counterparts.
@@ -236,7 +236,7 @@ NSString *const errorMethod = @"error";
       if (![self setCaptureSessionPreset:_mediaSettings.resolutionPreset withError:error]) {
         [_videoCaptureSession commitConfiguration];
         [_captureDevice unlockForConfiguration];
-        NSLog(@"[FLTCam] unlockForConfiguration with condition setCaptureSessionPreset %@", _captureDevice)
+        NSLog(@"[FLTCam] unlockForConfiguration with condition setCaptureSessionPreset %@", _captureDevice);
         return nil;
       }
 
@@ -249,22 +249,22 @@ NSString *const errorMethod = @"error";
 
       [_mediaSettingsAVWrapper commitConfigurationForSession:_videoCaptureSession];
       [_mediaSettingsAVWrapper unlockDevice:_captureDevice];
-      NSLog(@"[FLTCam] unlockDevice: %@", _captureDevice)
+      NSLog(@"[FLTCam] unlockDevice: %@", _captureDevice);
     } else {
       return nil;
     }
   } else {
     // If the frame rate is not important fall to a less restrictive
     // behavior (no configuration locking).
-    NSLog(@"[FLTCam] _mediaSettings.framesPerSecond is nil")
+    NSLog(@"[FLTCam] _mediaSettings.framesPerSecond is nil");
     if (![self setCaptureSessionPreset:_mediaSettings.resolutionPreset withError:error]) {
       return nil;
     }
   }
 
-  NSLog(@"[FLTCam] before updateOrientation")
+  NSLog(@"[FLTCam] before updateOrientation");
   [self updateOrientation];
-  NSLog(@"[FLTCam] after updateOrientation")
+  NSLog(@"[FLTCam] after updateOrientation");
 
   return self;
 }
