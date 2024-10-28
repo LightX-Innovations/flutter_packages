@@ -246,7 +246,7 @@ NSString *const errorMethod = @"error";
     }
   }
 
-  [self updateOrientation];
+  // [self updateOrientation];
 
   return self;
 }
