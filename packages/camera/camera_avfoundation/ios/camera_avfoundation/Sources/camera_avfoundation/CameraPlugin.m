@@ -55,26 +55,39 @@ static FlutterError *FlutterErrorFromNSError(NSError *error) {
   dispatch_queue_set_specific(_captureSessionQueue, FLTCaptureSessionQueueSpecific,
                               (void *)FLTCaptureSessionQueueSpecific, NULL);
 
-  [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
   [[NSNotificationCenter defaultCenter] addObserver:self
                                            selector:@selector(orientationChanged:)
-                                               name:UIDeviceOrientationDidChangeNotification
-                                             object:[UIDevice currentDevice]];
+                                               name:UIApplicationDidChangeStatusBarOrientationNotification
+                                             object:nil];
   return self;
 }
 
 - (void)detachFromEngineForRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar {
-  [UIDevice.currentDevice endGeneratingDeviceOrientationNotifications];
 }
 
 - (void)orientationChanged:(NSNotification *)note {
-  UIDevice *device = note.object;
-  UIDeviceOrientation orientation = device.orientation;
+  // Use the application's interface orientation for UI-specific changes
+  UIInterfaceOrientation interfaceOrientation = UIApplication.sharedApplication.statusBarOrientation;
 
-  if (orientation == UIDeviceOrientationFaceUp || orientation == UIDeviceOrientationFaceDown) {
-    // Do not change when oriented flat.
-    return;
+  // Map UIInterfaceOrientation to UIDeviceOrientation for compatibility
+  UIDeviceOrientation deviceOrientation;
+  switch (interfaceOrientation) {
+    case UIInterfaceOrientationPortrait:
+      deviceOrientation = UIDeviceOrientationPortrait;
+      break;
+    case UIInterfaceOrientationPortraitUpsideDown:
+      deviceOrientation = UIDeviceOrientationPortraitUpsideDown;
+      break;
+    case UIInterfaceOrientationLandscapeLeft:
+      deviceOrientation = UIDeviceOrientationLandscapeLeft;
+      break;
+    case UIInterfaceOrientationLandscapeRight:
+      deviceOrientation = UIDeviceOrientationLandscapeRight;
+      break;
+    default:
+      return;
   }
+
 
   __weak typeof(self) weakSelf = self;
   dispatch_async(self.captureSessionQueue, ^{
