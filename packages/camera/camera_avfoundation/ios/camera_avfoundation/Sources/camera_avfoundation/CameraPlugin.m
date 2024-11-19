@@ -92,9 +92,9 @@ static FlutterError *FlutterErrorFromNSError(NSError *error) {
   __weak typeof(self) weakSelf = self;
   dispatch_async(self.captureSessionQueue, ^{
     // `FLTCam::setDeviceOrientation` must be called on capture session queue.
-    [weakSelf.camera setDeviceOrientation:orientation];
+    [weakSelf.camera setDeviceOrientation:deviceOrientation];
     // `CameraPlugin::sendDeviceOrientation` can be called on any queue.
-    [weakSelf sendDeviceOrientation:orientation];
+    [weakSelf sendDeviceOrientation:deviceOrientation];
   });
 }
 
