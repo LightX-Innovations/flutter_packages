@@ -31,6 +31,8 @@ dev_dependencies:
 dependency_overrides:
   camera_web:
     path: ../../camera_web
+  camera_linux:
+    path: ../../camera_linux
 
 flutter:
   uses-material-design: true
