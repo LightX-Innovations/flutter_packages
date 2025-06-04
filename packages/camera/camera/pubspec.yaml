@@ -28,13 +28,13 @@ dependencies:
     git:
         url: git@github.com:LightX-Innovations/flutter_packages.git
         path: packages/camera/camera_avfoundation
-        ref: camera_0.1
+        ref: camera_0.2
   camera_platform_interface: ^2.6.0
   camera_linux:
     git:
       url: git@github.com:LightX-Innovations/flutter_packages.git
       path: packages/camera/camera_linux
-      ref: camera_0.1
+      ref: camera_0.2
   camera_web: ^0.3.3
   flutter:
     sdk: flutter
