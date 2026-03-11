@@ -942,7 +942,7 @@ final class DefaultCamera: NSObject, Camera {
       return
     }
     try? captureDevice.lockForConfiguration()
-    captureDevice.setFocusModeLockedWithLensPosition(position, completionHandler: nil)
+    captureDevice.setFocusModeLocked(lensPosition: position, completionHandler: nil)
     captureDevice.unlockForConfiguration()
     completion(.success(()))
   }

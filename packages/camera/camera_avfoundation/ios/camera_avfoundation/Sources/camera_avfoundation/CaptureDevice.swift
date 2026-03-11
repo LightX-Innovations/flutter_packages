@@ -38,8 +38,7 @@ protocol CaptureDevice: NSObjectProtocol {
   var focusMode: AVCaptureDevice.FocusMode { get set }
   var focusPointOfInterest: CGPoint { get set }
   var lensPosition: Float { get }
-  func setFocusModeLockedWithLensPosition(
-    _ lensPosition: Float, completionHandler handler: ((CMTime) -> Void)?)
+  func setFocusModeLocked(lensPosition: Float, completionHandler handler: ((CMTime) -> Void)?)
 
   // Exposure
   var isExposurePointOfInterestSupported: Bool { get }
