@@ -14,8 +14,6 @@ dependencies:
     # The example app is bundled with the plugin so we use a path dependency on
     # the parent directory to use the current plugin's version.
     path: ../
-  camera_avfoundation:
-    path: ../../camera_avfoundation
   flutter:
     sdk: flutter
   path_provider: ^2.0.0
@@ -32,6 +30,8 @@ dev_dependencies:
   leak_tracker_flutter_testing: any
 
 dependency_overrides:
+  camera_avfoundation:
+    path: ../../camera_avfoundation
   camera_web:
     path: ../../camera_web
   camera_linux:
