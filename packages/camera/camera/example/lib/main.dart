@@ -159,6 +159,7 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
           ),
           _captureControlRowWidget(),
           _modeControlRowWidget(),
+          if (!kIsWeb && Platform.isIOS) _lensPositionWidget(),
           Row(
             children: [
               ElevatedButton(
@@ -522,35 +523,46 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
                   ),
                 ],
               ),
-              if (!kIsWeb && Platform.isIOS) ...<Widget>[
-                const Center(child: Text('Lens Position')),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: <Widget>[
-                    const Text('0.0'),
-                    Slider(
-                      value: _currentLensPosition,
-                      min: 0.0,
-                      max: 1.0,
-                      divisions: 100,
-                      label: _currentLensPosition.toStringAsFixed(2),
-                      onChanged:
-                          controller != null &&
-                              controller!.value.focusMode == FocusMode.locked
-                          ? (double value) {
-                              setState(() => _currentLensPosition = value);
-                              (CameraPlatform.instance as AVFoundationCamera)
-                                  .setLensPosition(value);
-                            }
-                          : null,
-                    ),
-                    const Text('1.0'),
-                  ],
-                ),
-              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Lens position slider, shown on iOS only.
+  Widget _lensPositionWidget() {
+    return ColoredBox(
+      color: Colors.grey.shade50,
+      child: Column(
+        children: <Widget>[
+          const Center(child: Text('Lens Position (lock focus first)')),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: <Widget>[
+              const Text('0.0'),
+              Expanded(
+                child: Slider(
+                  value: _currentLensPosition,
+                  min: 0.0,
+                  max: 1.0,
+                  divisions: 100,
+                  label: _currentLensPosition.toStringAsFixed(2),
+                  onChanged:
+                      controller != null &&
+                          controller!.value.focusMode == FocusMode.locked
+                      ? (double value) {
+                          setState(() => _currentLensPosition = value);
+                          (CameraPlatform.instance as AVFoundationCamera)
+                              .setLensPosition(value);
+                        }
+                      : null,
+                ),
+              ),
+              const Text('1.0'),
+            ],
+          ),
+        ],
       ),
     );
   }
