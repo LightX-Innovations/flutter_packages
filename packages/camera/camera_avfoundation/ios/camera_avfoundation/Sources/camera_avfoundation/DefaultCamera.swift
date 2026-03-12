@@ -818,8 +818,18 @@ final class DefaultCamera: NSObject, Camera {
       ? lockedCaptureOrientation
       : deviceOrientation
 
-    updateOrientation(orientation, forCaptureOutput: capturePhotoOutput)
-    updateOrientation(orientation, forCaptureOutput: captureVideoOutput)
+    // When a custom transform is active on iOS 17+, skip the legacy
+    // videoOrientation calls. applyConnectionTransform() uses the modern
+    // videoRotationAngle API which supersedes it, and setting both in
+    // sequence causes a visible double-rotation in the live preview
+    // (e.g. when video recording stops).
+    if #available(iOS 17.0, *), cameraTransform != nil {
+      // videoRotationAngle (set by applyConnectionTransform) is authoritative;
+      // legacy videoOrientation would conflict and cause a transient glitch.
+    } else {
+      updateOrientation(orientation, forCaptureOutput: capturePhotoOutput)
+      updateOrientation(orientation, forCaptureOutput: captureVideoOutput)
+    }
 
     applyConnectionTransform()
   }
