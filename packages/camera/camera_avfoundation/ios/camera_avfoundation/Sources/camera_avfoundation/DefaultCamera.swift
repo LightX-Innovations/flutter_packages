@@ -605,8 +605,16 @@ final class DefaultCamera: NSObject, Camera {
       let origWidth = videoSettings?[AVVideoWidthKey] as? Int,
       let origHeight = videoSettings?[AVVideoHeightKey] as? Int
     {
-      videoSettings?[AVVideoWidthKey] = Int(Double(origWidth) * cropRect.width)
-      videoSettings?[AVVideoHeightKey] = Int(Double(origHeight) * cropRect.height)
+      // Sensor reports landscape-native (W > H). If recommended height > width,
+      // the connection is portrait so the buffer dims are swapped.
+      let sensorDims = videoDimensionsConverter(captureDevice.flutterActiveFormat)
+      let bufW = origHeight > origWidth ? Double(sensorDims.height) : Double(sensorDims.width)
+      let bufH = origHeight > origWidth ? Double(sensorDims.width) : Double(sensorDims.height)
+      let croppedW = bufW * cropRect.width
+      let croppedH = bufH * cropRect.height
+      let scale = min(Double(origWidth) / croppedW, Double(origHeight) / croppedH)
+      videoSettings?[AVVideoWidthKey] = Int(croppedW * scale)
+      videoSettings?[AVVideoHeightKey] = Int(croppedH * scale)
     }
 
     if mediaSettings.videoBitrate != nil || framesPerSecond != nil {
