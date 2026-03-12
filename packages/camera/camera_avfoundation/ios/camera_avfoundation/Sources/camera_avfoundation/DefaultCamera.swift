@@ -601,6 +601,14 @@ final class DefaultCamera: NSObject, Camera {
       for: captureVideoOutput
     )
 
+    if let cropRect = cameraTransform?.cropRect,
+      let origWidth = videoSettings?[AVVideoWidthKey] as? Int,
+      let origHeight = videoSettings?[AVVideoHeightKey] as? Int
+    {
+      videoSettings?[AVVideoWidthKey] = Int(Double(origWidth) * cropRect.width)
+      videoSettings?[AVVideoHeightKey] = Int(Double(origHeight) * cropRect.height)
+    }
+
     if mediaSettings.videoBitrate != nil || framesPerSecond != nil {
       var compressionProperties: [String: Any] = [:]
 
