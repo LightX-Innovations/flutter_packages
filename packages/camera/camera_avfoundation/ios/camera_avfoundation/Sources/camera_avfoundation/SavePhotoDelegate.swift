@@ -79,39 +79,49 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
 
       do {
         let data = photoDataProvider()
-        let finalData: WritableData?
+        let rawData = data as? Data
+        var finalData: WritableData? = data
 
         // If a crop is requested, apply it in Core Image before writing.
         if let crop = strongSelf.cropRect,
           let ctx = strongSelf.ciContext,
-          let rawData = data as? Data
+          let rawData = rawData
         {
-          let ci = CIImage(data: rawData)
-          let fullW = ci.map { Double($0.extent.width) } ?? 0
-          let fullH = ci.map { Double($0.extent.height) } ?? 0
+          let ci = CIImage(data: rawData)?.oriented(.up)
+          let fullW = ci?.extent.width ?? 0
+          let fullH = ci?.extent.height ?? 0
+          NSLog(
+            "[SavePhotoDelegate] crop: ci=%@, extent=%.0fx%.0f, rect=(%.3f,%.3f,%.3f,%.3f)",
+            ci != nil ? "ok" : "nil", fullW, fullH,
+            crop.x, crop.y, crop.width, crop.height)
           if let ci = ci, fullW > 0, fullH > 0 {
-            // Core Image origin is bottom-left; convert from top-left.
             let ciCrop = CGRect(
               x: crop.x * fullW,
               y: (1.0 - crop.y - crop.height) * fullH,
               width: crop.width * fullW,
               height: crop.height * fullH)
             let cropped = ci.cropped(to: ciCrop)
-              .transformed(
-                by: CGAffineTransform(translationX: -ciCrop.origin.x, y: -ciCrop.origin.y))
-            if let encoded = ctx.jpegRepresentation(
+            if let croppedData = ctx.jpegRepresentation(
               of: cropped,
-              colorSpace: CGColorSpaceCreateDeviceRGB())
+              colorSpace: cropped.colorSpace ?? CGColorSpaceCreateDeviceRGB())
             {
-              finalData = encoded
+              NSLog(
+                "[SavePhotoDelegate] crop applied: %dx%d -> %dx%d (%d bytes)",
+                Int(fullW), Int(fullH), Int(cropped.extent.width), Int(cropped.extent.height),
+                croppedData.count)
+              finalData = croppedData
             } else {
-              finalData = data
+              NSLog("[SavePhotoDelegate] jpegRepresentation failed — using uncropped")
             }
           } else {
-            finalData = data
+            NSLog("[SavePhotoDelegate] CIImage nil or zero extent — using uncropped")
           }
         } else {
-          finalData = data
+          NSLog(
+            "[SavePhotoDelegate] no crop: cropRect=%@, ciContext=%@, data=%@",
+            strongSelf.cropRect != nil ? "set" : "nil",
+            strongSelf.ciContext != nil ? "set" : "nil",
+            rawData != nil ? "set" : "nil")
         }
 
         try finalData?.writeToPath(strongSelf.path, options: .atomic)
