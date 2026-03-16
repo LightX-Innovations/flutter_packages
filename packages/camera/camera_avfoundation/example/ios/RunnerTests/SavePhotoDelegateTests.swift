@@ -48,6 +48,16 @@ final class SavePhotoDelegateTests: XCTestCase {
     return ctx.jpegRepresentation(of: ci, colorSpace: CGColorSpaceCreateDeviceRGB())!
   }
 
+  private func exifOrientation(of imageData: Data) -> Int? {
+    guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    else {
+      return nil
+    }
+
+    return properties[kCGImagePropertyOrientation] as? Int
+  }
+
   private func pixelSize(of imageData: Data) -> CGSize? {
     guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
       let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -155,124 +165,40 @@ final class SavePhotoDelegateTests: XCTestCase {
     waitForExpectations(timeout: 30, handler: nil)
   }
 
-  func testCenteredSquareCropRect_usesShortestEdgeAndCentersCrop() {
-    let ciCropRect = SavePhotoDelegate.centeredSquareCropRect(fullWidth: 2268, fullHeight: 4032)
-
-    XCTAssertEqual(ciCropRect.origin.x, 0, accuracy: CGFloat(0.001))
-    XCTAssertEqual(ciCropRect.origin.y, 882, accuracy: CGFloat(0.001))
-    XCTAssertEqual(ciCropRect.width, 2268, accuracy: CGFloat(0.001))
-    XCTAssertEqual(ciCropRect.height, 2268, accuracy: CGFloat(0.001))
-  }
-
-  func testCropPhotoData_cropsToSquareAndProducesSquareOutput() throws {
-    let rawData = try makeJPEGData(width: 60, height: 40, orientation: .right)
-
-    let result = try XCTUnwrap(
-      SavePhotoDelegate.cropPhotoData(
-      rawData,
-      ciContext: CIContext()))
-
-    XCTAssertEqual(result.fullExtent.width, 60, accuracy: CGFloat(0.001))
-    XCTAssertEqual(result.fullExtent.height, 40, accuracy: CGFloat(0.001))
-    XCTAssertEqual(result.croppedExtent.width, 40, accuracy: CGFloat(0.001))
-    XCTAssertEqual(result.croppedExtent.height, 40, accuracy: CGFloat(0.001))
-
-    let outputSize = try XCTUnwrap(pixelSize(of: result.data))
-    XCTAssertEqual(outputSize.width, 40, accuracy: CGFloat(0.001))
-    XCTAssertEqual(outputSize.height, 40, accuracy: CGFloat(0.001))
-  }
-
-  func testHandlePhotoCaptureResult_cropProducesSquareFromPortraitPhoto() throws {
-    let completionExpectation = expectation(description: "Cropped portrait photo should be written")
-    let ioQueue = DispatchQueue(label: "test")
-    let rawData = makeTestJPEG(width: 2268, height: 4032)
-    let cropRect = PlatformRect(x: 0, y: 0.125, width: 1.0, height: 0.75)
-    let fileUrl = makeTempPhotoPath()
-
-    let delegate = SavePhotoDelegate(
-      path: fileUrl.path,
-      ioQueue: ioQueue,
-      completionHandler: { path, error in
-        XCTAssertNil(error)
-        XCTAssertEqual(path, fileUrl.path)
-        completionExpectation.fulfill()
-      },
-      cropRect: cropRect,
-      ciContext: CIContext())
-
-    delegate.handlePhotoCaptureResult(error: nil) { rawData }
-
-    waitForExpectations(timeout: 30, handler: nil)
-
-    let writtenData = try Data(contentsOf: fileUrl)
-    let outputSize = try XCTUnwrap(pixelSize(of: writtenData))
-    XCTAssertEqual(outputSize.width, 2268, accuracy: CGFloat(0.001))
-    XCTAssertEqual(outputSize.height, 2268, accuracy: CGFloat(0.001))
-    try? FileManager.default.removeItem(at: fileUrl)
-  }
-
-  func testHandlePhotoCaptureResult_cropProducesSquareFromLandscapePhoto() throws {
-    let completionExpectation = expectation(description: "Cropped landscape photo should be written")
-    let ioQueue = DispatchQueue(label: "test")
-    let rawData = makeTestJPEG(width: 4032, height: 3024)
-    let cropRect = PlatformRect(x: 0.125, y: 0, width: 0.75, height: 1.0)
-    let fileUrl = makeTempPhotoPath()
-
-    let delegate = SavePhotoDelegate(
-      path: fileUrl.path,
-      ioQueue: ioQueue,
-      completionHandler: { path, error in
-        XCTAssertNil(error)
-        XCTAssertEqual(path, fileUrl.path)
-        completionExpectation.fulfill()
-      },
-      cropRect: cropRect,
-      ciContext: CIContext())
-
-    delegate.handlePhotoCaptureResult(error: nil) { rawData }
-
-    waitForExpectations(timeout: 30, handler: nil)
-
-    let writtenData = try Data(contentsOf: fileUrl)
-    let outputSize = try XCTUnwrap(pixelSize(of: writtenData))
-    XCTAssertEqual(outputSize.width, 3024, accuracy: CGFloat(0.001))
-    XCTAssertEqual(outputSize.height, 3024, accuracy: CGFloat(0.001))
-    try? FileManager.default.removeItem(at: fileUrl)
-  }
-
-  func testHandlePhotoCaptureResult_squarePhotoRemainsSquare() throws {
-    let completionExpectation = expectation(description: "Square photo should remain square")
-    let ioQueue = DispatchQueue(label: "test")
-    let rawData = makeTestJPEG(width: 3024, height: 3024)
-    let cropRect = PlatformRect(x: 0, y: 0, width: 1.0, height: 1.0)
-    let fileUrl = makeTempPhotoPath()
-
-    let delegate = SavePhotoDelegate(
-      path: fileUrl.path,
-      ioQueue: ioQueue,
-      completionHandler: { path, error in
-        XCTAssertNil(error)
-        XCTAssertEqual(path, fileUrl.path)
-        completionExpectation.fulfill()
-      },
-      cropRect: cropRect,
-      ciContext: CIContext())
-
-    delegate.handlePhotoCaptureResult(error: nil) { rawData }
-
-    waitForExpectations(timeout: 30, handler: nil)
-
-    let writtenData = try Data(contentsOf: fileUrl)
-    let outputSize = try XCTUnwrap(pixelSize(of: writtenData))
-    XCTAssertEqual(outputSize.width, 3024, accuracy: CGFloat(0.001))
-    XCTAssertEqual(outputSize.height, 3024, accuracy: CGFloat(0.001))
-    try? FileManager.default.removeItem(at: fileUrl)
-  }
-
-  func testHandlePhotoCaptureResult_noCropWritesOriginalDataUnchanged() throws {
+  func testHandlePhotoCaptureResult_noCropStripsExifOrientation() throws {
     let completionExpectation = expectation(description: "Uncropped photo should be written")
     let ioQueue = DispatchQueue(label: "test")
+    let rawData = try makeJPEGData(width: 60, height: 40, orientation: .rightMirrored)
+    XCTAssertEqual(exifOrientation(of: rawData), 7)
+    let fileUrl = makeTempPhotoPath()
+
+    let delegate = SavePhotoDelegate(
+      path: fileUrl.path,
+      ioQueue: ioQueue,
+      completionHandler: { path, error in
+        XCTAssertNil(error)
+        XCTAssertEqual(path, fileUrl.path)
+        completionExpectation.fulfill()
+      })
+
+    delegate.handlePhotoCaptureResult(error: nil) { rawData }
+
+    waitForExpectations(timeout: 30, handler: nil)
+
+    let writtenData = try Data(contentsOf: fileUrl)
+    XCTAssertNil(exifOrientation(of: writtenData))
+
+    let outputSize = try XCTUnwrap(pixelSize(of: writtenData))
+    XCTAssertEqual(outputSize.width, 60, accuracy: CGFloat(0.001))
+    XCTAssertEqual(outputSize.height, 40, accuracy: CGFloat(0.001))
+    try? FileManager.default.removeItem(at: fileUrl)
+  }
+
+  func testHandlePhotoCaptureResult_noCropLeavesPlainJpegUntouched() throws {
+    let completionExpectation = expectation(description: "Plain JPEG should be written")
+    let ioQueue = DispatchQueue(label: "test")
     let rawData = makeTestJPEG(width: 640, height: 480)
+    XCTAssertNil(exifOrientation(of: rawData))
     let fileUrl = makeTempPhotoPath()
 
     let delegate = SavePhotoDelegate(
@@ -293,37 +219,11 @@ final class SavePhotoDelegateTests: XCTestCase {
     try? FileManager.default.removeItem(at: fileUrl)
   }
 
-  func testHandlePhotoCaptureResult_invalidImageFallsBackToOriginalData() throws {
-    let completionExpectation = expectation(description: "Invalid image data should still be written")
+  func testHandlePhotoCaptureResult_cropProducesSquareAndNoExifOrientation() throws {
+    let completionExpectation = expectation(description: "Cropped portrait photo should be written")
     let ioQueue = DispatchQueue(label: "test")
-    let rawData = Data([0x00, 0x01, 0x02])
-    let fileUrl = makeTempPhotoPath()
-
-    let delegate = SavePhotoDelegate(
-      path: fileUrl.path,
-      ioQueue: ioQueue,
-      completionHandler: { path, error in
-        XCTAssertNil(error)
-        XCTAssertEqual(path, fileUrl.path)
-        completionExpectation.fulfill()
-      },
-      cropRect: PlatformRect(x: 0, y: 0, width: 1.0, height: 1.0),
-      ciContext: CIContext())
-
-    delegate.handlePhotoCaptureResult(error: nil) { rawData }
-
-    waitForExpectations(timeout: 30, handler: nil)
-
-    let writtenData = try Data(contentsOf: fileUrl)
-    XCTAssertEqual(writtenData, rawData)
-    try? FileManager.default.removeItem(at: fileUrl)
-  }
-
-  func testHandlePhotoCaptureResult_arbitraryCropRectValuesAreIgnored() throws {
-    let completionExpectation = expectation(description: "Arbitrary crop rect should still yield centered square")
-    let ioQueue = DispatchQueue(label: "test")
-    let rawData = makeTestJPEG(width: 1920, height: 1080)
-    let cropRect = PlatformRect(x: 0.9, y: 0.9, width: 0.1, height: 0.1)
+    let rawData = try makeJPEGData(width: 60, height: 40, orientation: .right)
+    let cropRect = PlatformRect(x: 0, y: 0.125, width: 1.0, height: 0.75)
     let fileUrl = makeTempPhotoPath()
 
     let delegate = SavePhotoDelegate(
@@ -342,9 +242,11 @@ final class SavePhotoDelegateTests: XCTestCase {
     waitForExpectations(timeout: 30, handler: nil)
 
     let writtenData = try Data(contentsOf: fileUrl)
+    XCTAssertNil(exifOrientation(of: writtenData))
+
     let outputSize = try XCTUnwrap(pixelSize(of: writtenData))
-    XCTAssertEqual(outputSize.width, 1080, accuracy: CGFloat(0.001))
-    XCTAssertEqual(outputSize.height, 1080, accuracy: CGFloat(0.001))
+    XCTAssertEqual(outputSize.width, 40, accuracy: CGFloat(0.001))
+    XCTAssertEqual(outputSize.height, 40, accuracy: CGFloat(0.001))
     try? FileManager.default.removeItem(at: fileUrl)
   }
 }
