@@ -99,6 +99,12 @@ class MockCaptureDevice: NSObject, CaptureDevice {
     set { setExposurePointOfInterestStub?(newValue) }
   }
 
+  var lensPosition: Float { 0.5 }
+
+  func setFocusModeLocked(lensPosition: Float, completionHandler handler: ((CMTime) -> Void)?) {
+    handler?(CMTime.zero)
+  }
+
   func setExposureTargetBias(_ bias: Float, completionHandler handler: ((CMTime) -> Void)? = nil) {
     setExposureTargetBiasStub?(bias, handler)
   }

@@ -19,6 +19,8 @@ final class MockAssetWriterInput: NSObject, AssetWriterInput {
 
   var isReadyForMoreMediaData = false
 
+  var transform = CGAffineTransform.identity
+
   func append(_ sampleBuffer: CMSampleBuffer) -> Bool {
     return appendStub?(sampleBuffer) ?? false
   }

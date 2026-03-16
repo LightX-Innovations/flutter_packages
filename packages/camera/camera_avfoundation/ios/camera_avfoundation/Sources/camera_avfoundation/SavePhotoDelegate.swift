@@ -26,8 +26,8 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   /// The completion handler block for capture and save photo operations.
   let completionHandler: SavePhotoDelegateCompletionHandler
 
-  /// Optional crop rectangle in normalised (0,1) coordinate space.
-  /// When non-nil the photo is cropped (GPU path) before it is written to disk.
+  /// Optional crop signal from Dart.
+  /// When non-nil the photo is cropped to a centered square before it is written to disk.
   private let cropRect: PlatformRect?
 
   /// Core Image context shared with the camera (Metal-backed). Only used when `cropRect` is set.
@@ -37,6 +37,45 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   /// Exposed for unit tests to verify the captured photo file path.
   var filePath: String {
     path
+  }
+
+  static func centeredSquareCropRect(fullWidth: Double, fullHeight: Double)
+    -> CGRect
+  {
+    let side = min(fullWidth, fullHeight)
+    return CGRect(
+      x: (fullWidth - side) / 2.0,
+      y: (fullHeight - side) / 2.0,
+      width: side,
+      height: side)
+  }
+
+  static func cropPhotoData(
+    _ rawData: Data,
+    ciContext: CIContext
+  ) -> (data: Data, fullExtent: CGRect, croppedExtent: CGRect)? {
+    guard let ci = CIImage(data: rawData)?.oriented(.up) else {
+      return nil
+    }
+
+    let fullExtent = ci.extent
+    guard fullExtent.width > 0, fullExtent.height > 0 else {
+      return nil
+    }
+
+    let ciCrop = centeredSquareCropRect(
+      fullWidth: fullExtent.width,
+      fullHeight: fullExtent.height)
+    let cropped = ci.cropped(to: ciCrop)
+
+    guard let croppedData = ciContext.jpegRepresentation(
+      of: cropped,
+      colorSpace: cropped.colorSpace ?? CGColorSpaceCreateDeviceRGB())
+    else {
+      return nil
+    }
+
+    return (croppedData, fullExtent, cropped.extent)
   }
 
   /// Initialize a photo capture delegate.
@@ -82,8 +121,8 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         let rawData = data as? Data
         var finalData: WritableData? = data
 
-        // If a crop is requested, apply it in Core Image before writing.
-        if let crop = strongSelf.cropRect,
+        // If a crop is requested, apply a centered square crop in Core Image before writing.
+        if strongSelf.cropRect != nil,
           let ctx = strongSelf.ciContext,
           let rawData = rawData
         {
@@ -91,25 +130,20 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
           let fullW = ci?.extent.width ?? 0
           let fullH = ci?.extent.height ?? 0
           NSLog(
-            "[SavePhotoDelegate] crop: ci=%@, extent=%.0fx%.0f, rect=(%.3f,%.3f,%.3f,%.3f)",
-            ci != nil ? "ok" : "nil", fullW, fullH,
-            crop.x, crop.y, crop.width, crop.height)
-          if let ci = ci, fullW > 0, fullH > 0 {
-            let ciCrop = CGRect(
-              x: crop.x * fullW,
-              y: (1.0 - crop.y - crop.height) * fullH,
-              width: crop.width * fullW,
-              height: crop.height * fullH)
-            let cropped = ci.cropped(to: ciCrop)
-            if let croppedData = ctx.jpegRepresentation(
-              of: cropped,
-              colorSpace: cropped.colorSpace ?? CGColorSpaceCreateDeviceRGB())
+            "[SavePhotoDelegate] crop requested — extent=%.0fx%.0f",
+            fullW,
+            fullH)
+          if ci != nil, fullW > 0, fullH > 0 {
+            if let cropped = SavePhotoDelegate.cropPhotoData(
+              rawData,
+              ciContext: ctx)
             {
               NSLog(
-                "[SavePhotoDelegate] crop applied: %dx%d -> %dx%d (%d bytes)",
-                Int(fullW), Int(fullH), Int(cropped.extent.width), Int(cropped.extent.height),
-                croppedData.count)
-              finalData = croppedData
+                "[SavePhotoDelegate] crop applied: %.0fx%.0f -> %.0fx%.0f (%d bytes)",
+                cropped.fullExtent.width, cropped.fullExtent.height,
+                cropped.croppedExtent.width, cropped.croppedExtent.height,
+                cropped.data.count)
+              finalData = cropped.data
             } else {
               NSLog("[SavePhotoDelegate] jpegRepresentation failed — using uncropped")
             }

@@ -108,6 +108,38 @@ private final class TestMediaSettingsAVWrapper: FLTCamMediaSettingsAVWrapper {
   }
 }
 
+private final class SquareCropWriterSettingsAVWrapper: FLTCamMediaSettingsAVWrapper {
+  let recommendedSettings: [String: Any]
+  var capturedVideoSettings: [String: Any]?
+
+  init(recommendedSettings: [String: Any]) {
+    self.recommendedSettings = recommendedSettings
+  }
+
+  override func assetWriterAudioInput(withOutputSettings outputSettings: [String: Any]?)
+    -> AssetWriterInput
+  {
+    MockAssetWriterInput()
+  }
+
+  override func assetWriterVideoInput(withOutputSettings outputSettings: [String: Any]?)
+    -> AssetWriterInput
+  {
+    capturedVideoSettings = outputSettings
+    return MockAssetWriterInput()
+  }
+
+  override func addInput(_ writerInput: AssetWriterInput, to writer: AssetWriter) {
+    // No-op.
+  }
+
+  override func recommendedVideoSettingsForAssetWriter(
+    withFileType fileType: AVFileType, for output: CaptureVideoDataOutput
+  ) -> [String: Any]? {
+    recommendedSettings
+  }
+}
+
 final class CameraSettingsTests: XCTestCase {
   func testSettings_shouldPassConfigurationToCameraDeviceAndWriter() {
     let enableAudio: Bool = true
@@ -146,6 +178,48 @@ final class CameraSettingsTests: XCTestCase {
         injectedWrapper.audioSettingsExpectation,
         injectedWrapper.videoSettingsExpectation,
       ], timeout: 1)
+  }
+
+  func testStartVideoRecording_usesSquareWriterDimensionsWhenCropEnabled() {
+    let wrapper = SquareCropWriterSettingsAVWrapper(
+      recommendedSettings: [
+        AVVideoCodecKey: AVVideoCodecType.h264,
+        AVVideoWidthKey: 1920,
+        AVVideoHeightKey: 1080,
+      ])
+
+    let configuration = CameraTestUtils.createTestCameraConfiguration()
+    configuration.mediaSettingsWrapper = wrapper
+    let camera = CameraTestUtils.createTestCamera(configuration)
+    camera.setTransform(
+      PlatformCameraTransform(
+        rotationDegrees: 0,
+        flipHorizontally: false,
+        flipVertically: false,
+        cropRect: PlatformRect(x: 0, y: 0.125, width: 1.0, height: 0.75)))
+
+    camera.startVideoRecording(completion: { _ in }, messengerForStreaming: nil)
+
+    XCTAssertEqual(wrapper.capturedVideoSettings?[AVVideoWidthKey] as? Int, 1080)
+    XCTAssertEqual(wrapper.capturedVideoSettings?[AVVideoHeightKey] as? Int, 1080)
+  }
+
+  func testStartVideoRecording_preservesWriterDimensionsWhenCropDisabled() {
+    let wrapper = SquareCropWriterSettingsAVWrapper(
+      recommendedSettings: [
+        AVVideoCodecKey: AVVideoCodecType.h264,
+        AVVideoWidthKey: 1920,
+        AVVideoHeightKey: 1080,
+      ])
+
+    let configuration = CameraTestUtils.createTestCameraConfiguration()
+    configuration.mediaSettingsWrapper = wrapper
+    let camera = CameraTestUtils.createTestCamera(configuration)
+
+    camera.startVideoRecording(completion: { _ in }, messengerForStreaming: nil)
+
+    XCTAssertEqual(wrapper.capturedVideoSettings?[AVVideoWidthKey] as? Int, 1920)
+    XCTAssertEqual(wrapper.capturedVideoSettings?[AVVideoHeightKey] as? Int, 1080)
   }
 
   func testSettings_ShouldBeSupportedByMethodCall() {

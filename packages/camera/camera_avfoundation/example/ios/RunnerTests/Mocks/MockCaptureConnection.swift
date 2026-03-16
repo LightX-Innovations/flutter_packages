@@ -9,6 +9,7 @@ import AVFoundation
 /// A mock implementation of `CaptureConnection` that allows injecting a custom implementation.
 final class MockCaptureConnection: NSObject, CaptureConnection {
   var setVideoOrientationStub: ((AVCaptureVideoOrientation) -> Void)?
+  var setVideoRotationAngleStub: ((CGFloat) -> Void)?
 
   var connection: AVCaptureConnection {
     preconditionFailure("Attempted to access unimplemented property: connection")
@@ -24,4 +25,17 @@ final class MockCaptureConnection: NSObject, CaptureConnection {
   var isVideoMirroringSupported = false
   var isVideoOrientationSupported = false
   var preferredVideoStabilizationMode = AVCaptureVideoStabilizationMode.off
+
+  @available(iOS 17.0, *)
+  var videoRotationAngle: CGFloat {
+    get { 0 }
+    set {
+      setVideoRotationAngleStub?(newValue)
+    }
+  }
+
+  @available(iOS 17.0, *)
+  func isVideoRotationAngleSupported(_ angle: CGFloat) -> Bool {
+    true
+  }
 }

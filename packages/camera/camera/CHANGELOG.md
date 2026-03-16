@@ -1,3 +1,7 @@
+## 0.12.1
+
+* Updates forked git dependency URLs to use HTTPS consistently for platform implementations.
+
 ## 0.12.0
 
 * Adds support for video stabilization.

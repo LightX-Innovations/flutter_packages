@@ -61,6 +61,18 @@ private class FakeMediaSettingsAVWrapper: FLTCamMediaSettingsAVWrapper {
   }
 }
 
+private func makePixelBuffer(width: Int, height: Int) -> CVPixelBuffer {
+  var buffer: CVPixelBuffer?
+  CVPixelBufferCreate(
+    kCFAllocatorDefault,
+    width,
+    height,
+    kCVPixelFormatType_32BGRA,
+    [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary,
+    &buffer)
+  return buffer!
+}
+
 /// Includes test cases related to sample buffer handling for FLTCam class.
 final class CameraSampleBufferTests: XCTestCase {
   private func createCamera() -> (
@@ -120,6 +132,54 @@ final class CameraSampleBufferTests: XCTestCase {
     XCTAssertEqual(
       deliveredPixelBuffer, capturedPixelBuffer,
       "FLTCam must deliver the latest captured pixel buffer to copyPixelBuffer API.")
+  }
+
+  func testApplyCrop_landscapeBufferProducesCenteredSquare() {
+    let camera = CameraTestUtils.createTestCamera()
+    let input = makePixelBuffer(width: 1920, height: 1080)
+
+    let output = camera.applyCrop(
+      input,
+      cropRect: PlatformRect(x: 0, y: 0.125, width: 1.0, height: 0.75))
+
+    XCTAssertEqual(CVPixelBufferGetWidth(output!), 1080)
+    XCTAssertEqual(CVPixelBufferGetHeight(output!), 1080)
+  }
+
+  func testApplyCrop_portraitBufferProducesCenteredSquare() {
+    let camera = CameraTestUtils.createTestCamera()
+    let input = makePixelBuffer(width: 1080, height: 1920)
+
+    let output = camera.applyCrop(
+      input,
+      cropRect: PlatformRect(x: 0.5, y: 0.5, width: 0.5, height: 0.5))
+
+    XCTAssertEqual(CVPixelBufferGetWidth(output!), 1080)
+    XCTAssertEqual(CVPixelBufferGetHeight(output!), 1080)
+  }
+
+  func testApplyCrop_fourByThreeBufferProducesCenteredSquare() {
+    let camera = CameraTestUtils.createTestCamera()
+    let input = makePixelBuffer(width: 4032, height: 3024)
+
+    let output = camera.applyCrop(
+      input,
+      cropRect: PlatformRect(x: 0, y: 0, width: 1.0, height: 1.0))
+
+    XCTAssertEqual(CVPixelBufferGetWidth(output!), 3024)
+    XCTAssertEqual(CVPixelBufferGetHeight(output!), 3024)
+  }
+
+  func testApplyCrop_squareBufferRemainsSquare() {
+    let camera = CameraTestUtils.createTestCamera()
+    let input = makePixelBuffer(width: 2048, height: 2048)
+
+    let output = camera.applyCrop(
+      input,
+      cropRect: PlatformRect(x: 0, y: 0, width: 1.0, height: 1.0))
+
+    XCTAssertEqual(CVPixelBufferGetWidth(output!), 2048)
+    XCTAssertEqual(CVPixelBufferGetHeight(output!), 2048)
   }
 
   func testDidOutputSampleBuffer_mustNotChangeSampleBufferRetainCountAfterPauseResumeRecording() {

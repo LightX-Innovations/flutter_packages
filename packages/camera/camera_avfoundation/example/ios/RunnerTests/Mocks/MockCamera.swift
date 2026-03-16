@@ -32,10 +32,12 @@ final class MockCamera: NSObject, Camera {
   var setExposurePointStub: ((PlatformPoint?, @escaping (Result<Void, any Error>) -> Void) -> Void)?
   var setFocusModeStub: ((PlatformFocusMode) -> Void)?
   var setFocusPointStub: ((PlatformPoint?, @escaping (Result<Void, any Error>) -> Void) -> Void)?
+  var setLensPositionStub: ((Float, @escaping (Result<Void, any Error>) -> Void) -> Void)?
   var setZoomLevelStub: ((CGFloat, @escaping (Result<Void, any Error>) -> Void) -> Void)?
   var setFlashModeStub: ((PlatformFlashMode, @escaping (Result<Void, any Error>) -> Void) -> Void)?
   var pausePreviewStub: (() -> Void)?
   var resumePreviewStub: (() -> Void)?
+  var setTransformStub: ((PlatformCameraTransform) -> Void)?
   var setDescriptionWhileRecordingStub:
     ((String, @escaping (Result<Void, any Error>) -> Void) -> Void)?
   var startImageStreamStub:
@@ -168,6 +170,10 @@ final class MockCamera: NSObject, Camera {
     setFocusPointStub?(point, completion)
   }
 
+  func setLensPosition(_ position: Float, completion: @escaping (Result<Void, any Error>) -> Void) {
+    setLensPositionStub?(position, completion)
+  }
+
   func setZoomLevel(
     _ zoom: CGFloat,
     withCompletion completion: @escaping (Result<Void, any Error>) -> Void
@@ -188,6 +194,10 @@ final class MockCamera: NSObject, Camera {
 
   func resumePreview() {
     resumePreviewStub?()
+  }
+
+  func setTransform(_ transform: PlatformCameraTransform) {
+    setTransformStub?(transform)
   }
 
   func setVideoStabilizationMode(

@@ -601,20 +601,13 @@ final class DefaultCamera: NSObject, Camera {
       for: captureVideoOutput
     )
 
-    if let cropRect = cameraTransform?.cropRect,
+    if cameraTransform?.cropRect != nil,
       let origWidth = videoSettings?[AVVideoWidthKey] as? Int,
       let origHeight = videoSettings?[AVVideoHeightKey] as? Int
     {
-      // Sensor reports landscape-native (W > H). If recommended height > width,
-      // the connection is portrait so the buffer dims are swapped.
-      let sensorDims = videoDimensionsConverter(captureDevice.flutterActiveFormat)
-      let bufW = origHeight > origWidth ? Double(sensorDims.height) : Double(sensorDims.width)
-      let bufH = origHeight > origWidth ? Double(sensorDims.width) : Double(sensorDims.height)
-      let croppedW = bufW * cropRect.width
-      let croppedH = bufH * cropRect.height
-      let scale = min(Double(origWidth) / croppedW, Double(origHeight) / croppedH)
-      videoSettings?[AVVideoWidthKey] = Int(croppedW * scale)
-      videoSettings?[AVVideoHeightKey] = Int(croppedH * scale)
+      let side = min(origWidth, origHeight)
+      videoSettings?[AVVideoWidthKey] = side
+      videoSettings?[AVVideoHeightKey] = side
     }
 
     if mediaSettings.videoBitrate != nil || framesPerSecond != nil {
@@ -882,20 +875,25 @@ final class DefaultCamera: NSObject, Camera {
     }
   }
 
-  /// Crops `pixelBuffer` to the normalised rect from `transform.cropRect`.
+  /// Crops `pixelBuffer` to a centered square.
+  ///
+  /// The presence of a `cropRect` signals that square crop is enabled. The
+  /// normalised values themselves are ignored because the preview dimensions
+  /// used to compute them can differ from the actual buffer dimensions.
   ///
   /// The crop is performed on the GPU via Metal-backed Core Image (`ciContext`).
   /// Returns `nil` when allocation fails; callers should fall back to the original buffer.
-  private func applyCrop(
-    _ pixelBuffer: CVPixelBuffer, cropRect: PlatformRect
+  func applyCrop(
+    _ pixelBuffer: CVPixelBuffer, cropRect _: PlatformRect
   ) -> CVPixelBuffer? {
     let fullWidth = CVPixelBufferGetWidth(pixelBuffer)
     let fullHeight = CVPixelBufferGetHeight(pixelBuffer)
 
-    let cropX = cropRect.x * Double(fullWidth)
-    let cropY = cropRect.y * Double(fullHeight)
-    let cropW = cropRect.width * Double(fullWidth)
-    let cropH = cropRect.height * Double(fullHeight)
+    let side = min(fullWidth, fullHeight)
+    let cropX = Double(fullWidth - side) / 2.0
+    let cropY = Double(fullHeight - side) / 2.0
+    let cropW = Double(side)
+    let cropH = Double(side)
 
     // Core Image origin is bottom-left; convert from top-left.
     let ciCropRect = CGRect(

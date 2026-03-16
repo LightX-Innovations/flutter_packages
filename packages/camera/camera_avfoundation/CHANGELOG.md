@@ -1,3 +1,7 @@
+## 0.10.3
+
+* Fixes centered square crop behavior for photos, preview buffers, and recorded video when transform crop is enabled.
+
 ## 0.10.2
 
 * Adds setLensPosition support for manually controlling lens focus position on iOS.
