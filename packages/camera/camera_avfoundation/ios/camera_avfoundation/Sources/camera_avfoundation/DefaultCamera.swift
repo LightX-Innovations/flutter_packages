@@ -769,7 +769,13 @@ final class DefaultCamera: NSObject, Camera {
         }
       },
       cropRect: cameraTransform?.cropRect,
-      ciContext: cameraTransform?.cropRect != nil ? ciContext : nil
+      ciContext: cameraTransform?.cropRect != nil ? ciContext : nil,
+      pixelsArePhysicallyRotated: {
+        if #available(iOS 17.0, *) {
+          return cameraTransform != nil
+        }
+        return false
+      }()
     )
 
     assert(

@@ -22,6 +22,13 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   /// Core Image context shared with the camera. Used only for crop rendering.
   private let ciContext: CIContext?
 
+  /// When `true`, the capture connection has already physically rotated the
+  /// pixel data (via `videoRotationAngle` on iOS 17+). Any EXIF orientation
+  /// tag present in the JPEG is therefore stale and must be stripped without
+  /// re-applying. When `false` (legacy path), the EXIF orientation is
+  /// meaningful and must be baked into the pixels before stripping.
+  private let pixelsArePhysicallyRotated: Bool
+
   var filePath: String {
     path
   }
@@ -31,13 +38,15 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     ioQueue: DispatchQueue,
     completionHandler: @escaping SavePhotoDelegateCompletionHandler,
     cropRect: PlatformRect? = nil,
-    ciContext: CIContext? = nil
+    ciContext: CIContext? = nil,
+    pixelsArePhysicallyRotated: Bool = false
   ) {
     self.path = path
     self.ioQueue = ioQueue
     self.completionHandler = completionHandler
     self.cropRect = cropRect
     self.ciContext = ciContext
+    self.pixelsArePhysicallyRotated = pixelsArePhysicallyRotated
     super.init()
   }
 
@@ -52,9 +61,23 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
 
   static func cropPhotoData(
     _ rawData: Data,
-    ciContext: CIContext
+    ciContext: CIContext,
+    pixelsArePhysicallyRotated: Bool = false
   ) -> (data: Data, fullExtent: CGRect, croppedExtent: CGRect)? {
-    guard let ci = orientedCIImage(from: rawData) else {
+    // When the capture connection has already physically rotated the pixels
+    // (iOS 17+ with videoRotationAngle), any EXIF orientation tag is stale.
+    // Applying orientedCIImage would double-rotate onto already-correct pixels.
+    // Use CIImage(data:) directly so the crop is on the as-captured (correct)
+    // pixels.  The stale EXIF is stripped by rewriteImageData afterwards.
+    // On older OS paths EXIF has not been physically baked in, so we still
+    // need orientedCIImage to rotate the raw sensor pixels via the EXIF hint.
+    let ci: CIImage?
+    if pixelsArePhysicallyRotated {
+      ci = CIImage(data: rawData)
+    } else {
+      ci = orientedCIImage(from: rawData)
+    }
+    guard let ci = ci else {
       return nil
     }
 
@@ -232,7 +255,9 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             "[SavePhotoDelegate] crop requested - extent=%.0fx%.0f",
             fullW,
             fullH)
-          if let cropped = SavePhotoDelegate.cropPhotoData(rawData, ciContext: ctx) {
+          if let cropped = SavePhotoDelegate.cropPhotoData(
+            rawData, ciContext: ctx,
+            pixelsArePhysicallyRotated: strongSelf.pixelsArePhysicallyRotated) {
             NSLog(
               "[SavePhotoDelegate] crop applied: %.0fx%.0f -> %.0fx%.0f (%d bytes)",
               cropped.fullExtent.width,
@@ -244,7 +269,9 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
               ?? SavePhotoDelegate.clearJpegExifOrientation(cropped.data)
           } else {
             NSLog("[SavePhotoDelegate] jpegRepresentation failed - using uncropped")
-            finalData = SavePhotoDelegate.normalizePhotoDataRemovingExifOrientation(
+            finalData = strongSelf.pixelsArePhysicallyRotated
+            ? SavePhotoDelegate.clearJpegExifOrientation(rawData)
+            : SavePhotoDelegate.normalizePhotoDataRemovingExifOrientation(
               rawData,
               ciContext: ctx)
           }
@@ -254,9 +281,11 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             strongSelf.cropRect != nil ? "set" : "nil",
             strongSelf.ciContext != nil ? "set" : "nil",
             "set")
-          finalData = SavePhotoDelegate.normalizePhotoDataRemovingExifOrientation(
-            rawData,
-            ciContext: strongSelf.ciContext)
+          finalData = strongSelf.pixelsArePhysicallyRotated
+            ? SavePhotoDelegate.clearJpegExifOrientation(rawData)
+            : SavePhotoDelegate.normalizePhotoDataRemovingExifOrientation(
+              rawData,
+              ciContext: strongSelf.ciContext)
         } else {
           NSLog(
             "[SavePhotoDelegate] no crop: cropRect=%@, ciContext=%@, data=%@",
