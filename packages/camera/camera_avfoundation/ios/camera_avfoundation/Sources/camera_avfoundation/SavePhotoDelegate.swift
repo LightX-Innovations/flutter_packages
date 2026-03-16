@@ -54,7 +54,7 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     _ rawData: Data,
     ciContext: CIContext
   ) -> (data: Data, fullExtent: CGRect, croppedExtent: CGRect)? {
-    guard let ci = CIImage(data: rawData)?.oriented(.up) else {
+    guard let ci = orientedCIImage(from: rawData) else {
       return nil
     }
 
@@ -87,7 +87,31 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
       return data
     }
 
-    return stripExifApp1Segments(data) ?? data
+    return rewriteImageData(data, metadataSourceData: data) ?? data
+  }
+
+  static func normalizePhotoDataRemovingExifOrientation(
+    _ data: Data,
+    ciContext: CIContext? = nil
+  ) -> Data? {
+    guard isJpeg(data), hasExifOrientation(data) else {
+      return clearJpegExifOrientation(data)
+    }
+
+    guard let ciImage = orientedCIImage(from: data) else {
+      return clearJpegExifOrientation(data)
+    }
+
+    let context = ciContext ?? CIContext()
+    guard let normalizedData = context.jpegRepresentation(
+      of: ciImage,
+      colorSpace: ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB())
+    else {
+      return clearJpegExifOrientation(data)
+    }
+
+    return rewriteImageData(normalizedData, metadataSourceData: data)
+      ?? clearJpegExifOrientation(normalizedData)
   }
 
   private static func isJpeg(_ data: Data) -> Bool {
@@ -95,91 +119,89 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   }
 
   private static func hasExifOrientation(_ data: Data) -> Bool {
+    return exifOrientationValue(data) != nil
+  }
+
+  private static func exifOrientationValue(_ data: Data) -> Int? {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil),
       let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
     else {
-      return false
-    }
-
-    return properties[kCGImagePropertyOrientation] != nil
-  }
-
-  private static func stripExifApp1Segments(_ data: Data) -> Data? {
-    guard isJpeg(data) else {
       return nil
     }
 
-    var output = Data([0xFF, 0xD8])
-    var offset = 2
-    var strippedAny = false
+    return properties[kCGImagePropertyOrientation] as? Int
+  }
 
-    while offset < data.count {
-      if data[offset] != 0xFF {
-        output.append(data.subdata(in: offset..<data.count))
-        return strippedAny ? output : data
-      }
-
-      let markerStart = offset
-      while offset < data.count && data[offset] == 0xFF {
-        offset += 1
-      }
-      if offset >= data.count {
-        return strippedAny ? output : data
-      }
-
-      let marker = data[offset]
-      offset += 1
-
-      let hasNoLength =
-        marker == 0xD8 ||
-        marker == 0xD9 ||
-        marker == 0x01 ||
-        (marker >= 0xD0 && marker <= 0xD7)
-
-      if hasNoLength {
-        output.append(data.subdata(in: markerStart..<offset))
-        if marker == 0xD9 {
-          return strippedAny ? output : data
-        }
-        continue
-      }
-
-      if offset + 2 > data.count {
-        return strippedAny ? output : data
-      }
-
-      let length = (Int(data[offset]) << 8) | Int(data[offset + 1])
-      let segmentEnd = offset + length
-      if length < 2 || segmentEnd > data.count {
-        return strippedAny ? output : data
-      }
-
-      if marker == 0xDA {
-        output.append(data.subdata(in: markerStart..<segmentEnd))
-        output.append(data.subdata(in: segmentEnd..<data.count))
-        return strippedAny ? output : data
-      }
-
-      let isExifApp1 =
-        marker == 0xE1 &&
-        length >= 8 &&
-        data[offset + 2] == 0x45 &&
-        data[offset + 3] == 0x78 &&
-        data[offset + 4] == 0x69 &&
-        data[offset + 5] == 0x66 &&
-        data[offset + 6] == 0x00 &&
-        data[offset + 7] == 0x00
-
-      if isExifApp1 {
-        strippedAny = true
-      } else {
-        output.append(data.subdata(in: markerStart..<segmentEnd))
-      }
-
-      offset = segmentEnd
+  private static func orientedCIImage(from data: Data) -> CIImage? {
+    guard let image = CIImage(data: data) else {
+      return nil
     }
 
-    return strippedAny ? output : data
+    guard let orientation = exifOrientationValue(data), orientation != 1 else {
+      return image
+    }
+
+    return image.oriented(forExifOrientation: Int32(orientation))
+  }
+
+  private static func metadataWithoutOrientation(from data: Data) -> [CFString: Any]? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    else {
+      return nil
+    }
+
+    var metadata: [CFString: Any] = [:]
+    for (key, value) in properties where key != kCGImagePropertyOrientation {
+      if value is [CFString: Any] || value is [String: Any] {
+        metadata[key] = removingOrientationEntries(from: value)
+      }
+    }
+
+    return metadata.isEmpty ? nil : metadata
+  }
+
+  private static func removingOrientationEntries(from value: Any) -> Any {
+    if let dictionary = value as? [CFString: Any] {
+      var cleaned: [String: Any] = [:]
+      for (key, nestedValue) in dictionary where (key as String) != "Orientation" {
+        cleaned[key as String] = removingOrientationEntries(from: nestedValue)
+      }
+      return cleaned
+    }
+
+    if let dictionary = value as? [String: Any] {
+      var cleaned: [String: Any] = [:]
+      for (key, nestedValue) in dictionary where key != "Orientation" {
+        cleaned[key] = removingOrientationEntries(from: nestedValue)
+      }
+      return cleaned
+    }
+
+    return value
+  }
+
+  private static func rewriteImageData(_ imageData: Data, metadataSourceData: Data) -> Data? {
+    guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+      let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+      let imageType = CGImageSourceGetType(source)
+    else {
+      return nil
+    }
+
+    let output = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(output, imageType, 1, nil) else {
+      return nil
+    }
+
+    let metadata = metadataWithoutOrientation(from: metadataSourceData) as CFDictionary?
+    CGImageDestinationAddImage(destination, image, metadata)
+
+    guard CGImageDestinationFinalize(destination) else {
+      return nil
+    }
+
+    return output as Data
   }
 
   func handlePhotoCaptureResult(
@@ -218,10 +240,13 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
               cropped.croppedExtent.width,
               cropped.croppedExtent.height,
               cropped.data.count)
-            finalData = SavePhotoDelegate.clearJpegExifOrientation(cropped.data)
+            finalData = SavePhotoDelegate.rewriteImageData(cropped.data, metadataSourceData: rawData)
+              ?? SavePhotoDelegate.clearJpegExifOrientation(cropped.data)
           } else {
             NSLog("[SavePhotoDelegate] jpegRepresentation failed - using uncropped")
-            finalData = SavePhotoDelegate.clearJpegExifOrientation(rawData)
+            finalData = SavePhotoDelegate.normalizePhotoDataRemovingExifOrientation(
+              rawData,
+              ciContext: ctx)
           }
         } else if let rawData = rawData {
           NSLog(
@@ -229,7 +254,9 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             strongSelf.cropRect != nil ? "set" : "nil",
             strongSelf.ciContext != nil ? "set" : "nil",
             "set")
-          finalData = SavePhotoDelegate.clearJpegExifOrientation(rawData)
+          finalData = SavePhotoDelegate.normalizePhotoDataRemovingExifOrientation(
+            rawData,
+            ciContext: strongSelf.ciContext)
         } else {
           NSLog(
             "[SavePhotoDelegate] no crop: cropRect=%@, ciContext=%@, data=%@",

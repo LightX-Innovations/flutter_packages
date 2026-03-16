@@ -14,7 +14,8 @@ final class SavePhotoDelegateTests: XCTestCase {
   private func makeJPEGData(
     width: Int,
     height: Int,
-    orientation: CGImagePropertyOrientation = .up
+    orientation: CGImagePropertyOrientation = .up,
+    additionalProperties: [CFString: Any] = [:]
   ) throws -> Data {
     let ciContext = CIContext()
     let image = CIImage(color: .init(red: 0.2, green: 0.6, blue: 0.9))
@@ -36,8 +37,9 @@ final class SavePhotoDelegateTests: XCTestCase {
       throw NSError(domain: "SavePhotoDelegateTests", code: 2)
     }
 
-    let properties = [kCGImagePropertyOrientation: orientation.rawValue] as CFDictionary
-    CGImageDestinationAddImage(destination, cgImage, properties)
+    var properties = additionalProperties
+    properties[kCGImagePropertyOrientation] = orientation.rawValue
+    CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
     XCTAssertTrue(CGImageDestinationFinalize(destination))
     return data as Data
   }
@@ -68,6 +70,45 @@ final class SavePhotoDelegateTests: XCTestCase {
     }
 
     return CGSize(width: width, height: height)
+  }
+
+  private func displayedPixelSize(of imageData: Data) -> CGSize? {
+    guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+      let image = CGImageSourceCreateThumbnailAtIndex(
+        source,
+        0,
+        [
+          kCGImageSourceCreateThumbnailFromImageAlways: true,
+          kCGImageSourceCreateThumbnailWithTransform: true,
+          kCGImageSourceThumbnailMaxPixelSize: 4096,
+        ] as CFDictionary)
+    else {
+      return nil
+    }
+
+    return CGSize(width: image.width, height: image.height)
+  }
+
+  private func exifUserComment(of imageData: Data) -> String? {
+    guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+      let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+    else {
+      return nil
+    }
+
+    return exif[kCGImagePropertyExifUserComment] as? String
+  }
+
+  private func tiffMake(of imageData: Data) -> String? {
+    guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+      let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+    else {
+      return nil
+    }
+
+    return tiff[kCGImagePropertyTIFFMake] as? String
   }
 
   private func makeTempPhotoPath() -> URL {
@@ -189,8 +230,75 @@ final class SavePhotoDelegateTests: XCTestCase {
     XCTAssertNil(exifOrientation(of: writtenData))
 
     let outputSize = try XCTUnwrap(pixelSize(of: writtenData))
-    XCTAssertEqual(outputSize.width, 60, accuracy: CGFloat(0.001))
-    XCTAssertEqual(outputSize.height, 40, accuracy: CGFloat(0.001))
+    XCTAssertEqual(outputSize.width, 40, accuracy: CGFloat(0.001))
+    XCTAssertEqual(outputSize.height, 60, accuracy: CGFloat(0.001))
+    try? FileManager.default.removeItem(at: fileUrl)
+  }
+
+  func testHandlePhotoCaptureResult_noCropPreservesDisplayedOrientationAfterExifCleanup() throws {
+    let completionExpectation = expectation(description: "Uncropped photo should preserve display orientation")
+    let ioQueue = DispatchQueue(label: "test")
+    let rawData = try makeJPEGData(width: 60, height: 40, orientation: .rightMirrored)
+    let rawDisplayedSize = try XCTUnwrap(displayedPixelSize(of: rawData))
+    XCTAssertEqual(rawDisplayedSize.width, 40, accuracy: CGFloat(0.001))
+    XCTAssertEqual(rawDisplayedSize.height, 60, accuracy: CGFloat(0.001))
+    let fileUrl = makeTempPhotoPath()
+
+    let delegate = SavePhotoDelegate(
+      path: fileUrl.path,
+      ioQueue: ioQueue,
+      completionHandler: { path, error in
+        XCTAssertNil(error)
+        XCTAssertEqual(path, fileUrl.path)
+        completionExpectation.fulfill()
+      })
+
+    delegate.handlePhotoCaptureResult(error: nil) { rawData }
+
+    waitForExpectations(timeout: 30, handler: nil)
+
+    let writtenData = try Data(contentsOf: fileUrl)
+    XCTAssertNil(exifOrientation(of: writtenData))
+    let displayedSize = try XCTUnwrap(displayedPixelSize(of: writtenData))
+    XCTAssertEqual(displayedSize.width, 40, accuracy: CGFloat(0.001))
+    XCTAssertEqual(displayedSize.height, 60, accuracy: CGFloat(0.001))
+    try? FileManager.default.removeItem(at: fileUrl)
+  }
+
+  func testHandlePhotoCaptureResult_noCropPreservesOtherMetadata() throws {
+    let completionExpectation = expectation(description: "Uncropped photo should preserve non-orientation metadata")
+    let ioQueue = DispatchQueue(label: "test")
+    let rawData = try makeJPEGData(
+      width: 60,
+      height: 40,
+      orientation: .rightMirrored,
+      additionalProperties: [
+        kCGImagePropertyExifDictionary: [
+          kCGImagePropertyExifUserComment: "medical-note"
+        ],
+        kCGImagePropertyTIFFDictionary: [
+          kCGImagePropertyTIFFMake: "LightX"
+        ],
+      ])
+    let fileUrl = makeTempPhotoPath()
+
+    let delegate = SavePhotoDelegate(
+      path: fileUrl.path,
+      ioQueue: ioQueue,
+      completionHandler: { path, error in
+        XCTAssertNil(error)
+        XCTAssertEqual(path, fileUrl.path)
+        completionExpectation.fulfill()
+      })
+
+    delegate.handlePhotoCaptureResult(error: nil) { rawData }
+
+    waitForExpectations(timeout: 30, handler: nil)
+
+    let writtenData = try Data(contentsOf: fileUrl)
+    XCTAssertNil(exifOrientation(of: writtenData))
+    XCTAssertEqual(exifUserComment(of: writtenData), "medical-note")
+    XCTAssertEqual(tiffMake(of: writtenData), "LightX")
     try? FileManager.default.removeItem(at: fileUrl)
   }
 
@@ -244,6 +352,49 @@ final class SavePhotoDelegateTests: XCTestCase {
     let writtenData = try Data(contentsOf: fileUrl)
     XCTAssertNil(exifOrientation(of: writtenData))
 
+    let outputSize = try XCTUnwrap(pixelSize(of: writtenData))
+    XCTAssertEqual(outputSize.width, 40, accuracy: CGFloat(0.001))
+    XCTAssertEqual(outputSize.height, 40, accuracy: CGFloat(0.001))
+    try? FileManager.default.removeItem(at: fileUrl)
+  }
+
+  func testHandlePhotoCaptureResult_cropPreservesOtherMetadata() throws {
+    let completionExpectation = expectation(description: "Cropped photo should preserve non-orientation metadata")
+    let ioQueue = DispatchQueue(label: "test")
+    let rawData = try makeJPEGData(
+      width: 60,
+      height: 40,
+      orientation: .right,
+      additionalProperties: [
+        kCGImagePropertyExifDictionary: [
+          kCGImagePropertyExifUserComment: "medical-note"
+        ],
+        kCGImagePropertyTIFFDictionary: [
+          kCGImagePropertyTIFFMake: "LightX"
+        ],
+      ])
+    let cropRect = PlatformRect(x: 0, y: 0.125, width: 1.0, height: 0.75)
+    let fileUrl = makeTempPhotoPath()
+
+    let delegate = SavePhotoDelegate(
+      path: fileUrl.path,
+      ioQueue: ioQueue,
+      completionHandler: { path, error in
+        XCTAssertNil(error)
+        XCTAssertEqual(path, fileUrl.path)
+        completionExpectation.fulfill()
+      },
+      cropRect: cropRect,
+      ciContext: CIContext())
+
+    delegate.handlePhotoCaptureResult(error: nil) { rawData }
+
+    waitForExpectations(timeout: 30, handler: nil)
+
+    let writtenData = try Data(contentsOf: fileUrl)
+    XCTAssertNil(exifOrientation(of: writtenData))
+    XCTAssertEqual(exifUserComment(of: writtenData), "medical-note")
+    XCTAssertEqual(tiffMake(of: writtenData), "LightX")
     let outputSize = try XCTUnwrap(pixelSize(of: writtenData))
     XCTAssertEqual(outputSize.width, 40, accuracy: CGFloat(0.001))
     XCTAssertEqual(outputSize.height, 40, accuracy: CGFloat(0.001))
