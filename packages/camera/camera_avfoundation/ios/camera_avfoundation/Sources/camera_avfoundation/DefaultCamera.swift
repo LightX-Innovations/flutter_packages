@@ -770,12 +770,8 @@ final class DefaultCamera: NSObject, Camera {
       },
       cropRect: cameraTransform?.cropRect,
       ciContext: cameraTransform?.cropRect != nil ? ciContext : nil,
-      pixelsArePhysicallyRotated: {
-        if #available(iOS 17.0, *) {
-          return cameraTransform != nil
-        }
-        return false
-      }()
+      rotationDegrees: cameraTransform?.rotationDegrees ?? 0,
+      flipHorizontally: cameraTransform?.flipHorizontally ?? false
     )
 
     assert(
@@ -854,25 +850,28 @@ final class DefaultCamera: NSObject, Camera {
   ///
   /// `AVCaptureConnection.videoRotationAngle` (iOS 17+) instructs the camera ISP to rotate
   /// the pixel data in hardware – zero CPU/GPU cost – and the effect propagates to the
-  /// preview texture, image stream, video recording, and photo capture simultaneously.
+  /// preview texture, image stream, and video recording.
+  ///
+  /// Photo rotation and flip are handled explicitly in SavePhotoDelegate via CoreImage
+  /// (independent of whether the photo connection supports videoRotationAngle).
   private func applyConnectionTransform() {
     guard let transform = cameraTransform else { return }
 
-    for output in [captureVideoOutput as CaptureOutput, capturePhotoOutput as CaptureOutput] {
-      guard let connection = output.connection(with: .video) else { continue }
+    // Only apply to the video output (preview + recordings).
+    // Photo output rotation/flip is applied in SavePhotoDelegate via CoreImage.
+    guard let connection = captureVideoOutput.connection(with: .video) else { return }
 
-      if #available(iOS 17.0, *) {
-        let angle = transform.rotationDegrees.truncatingRemainder(dividingBy: 360)
-        if connection.isVideoRotationAngleSupported(angle) {
-          connection.videoRotationAngle = angle
-        }
+    if #available(iOS 17.0, *) {
+      let angle = transform.rotationDegrees.truncatingRemainder(dividingBy: 360)
+      if connection.isVideoRotationAngleSupported(angle) {
+        connection.videoRotationAngle = angle
       }
+    }
 
-      // Vertical flip is implemented as a composition: mirror horizontally + rotate 180°.
-      let mirrorH = transform.flipHorizontally != transform.flipVertically
-      if connection.isVideoMirroringSupported {
-        connection.isVideoMirrored = mirrorH
-      }
+    // Vertical flip is implemented as a composition: mirror horizontally + rotate 180°.
+    let mirrorH = transform.flipHorizontally != transform.flipVertically
+    if connection.isVideoMirroringSupported {
+      connection.isVideoMirrored = mirrorH
     }
   }
 

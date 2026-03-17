@@ -19,15 +19,15 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   /// When non-nil the photo is cropped to a centered square before being written.
   private let cropRect: PlatformRect?
 
-  /// Core Image context shared with the camera. Used only for crop rendering.
+  /// Core Image context shared with the camera. Used only for crop/transform rendering.
   private let ciContext: CIContext?
 
-  /// When `true`, the capture connection has already physically rotated the
-  /// pixel data (via `videoRotationAngle` on iOS 17+). Any EXIF orientation
-  /// tag present in the JPEG is therefore stale and must be stripped without
-  /// re-applying. When `false` (legacy path), the EXIF orientation is
-  /// meaningful and must be baked into the pixels before stripping.
-  private let pixelsArePhysicallyRotated: Bool
+  /// Clockwise rotation in degrees to apply to the captured photo pixels via CoreImage.
+  /// Must be 0, 90, 180, or 270. Applied before cropping.
+  private let rotationDegrees: Double
+
+  /// Whether to flip the captured photo horizontally after rotation.
+  private let flipHorizontally: Bool
 
   var filePath: String {
     path
@@ -39,15 +39,39 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     completionHandler: @escaping SavePhotoDelegateCompletionHandler,
     cropRect: PlatformRect? = nil,
     ciContext: CIContext? = nil,
-    pixelsArePhysicallyRotated: Bool = false
+    rotationDegrees: Double = 0,
+    flipHorizontally: Bool = false
   ) {
     self.path = path
     self.ioQueue = ioQueue
     self.completionHandler = completionHandler
     self.cropRect = cropRect
     self.ciContext = ciContext
-    self.pixelsArePhysicallyRotated = pixelsArePhysicallyRotated
+    self.rotationDegrees = rotationDegrees
+    self.flipHorizontally = flipHorizontally
     super.init()
+  }
+
+  /// Converts (clockwise rotation, horizontal flip) to the EXIF orientation value
+  /// suitable for `CIImage.oriented(forExifOrientation:)`.
+  ///
+  /// EXIF orientation encodes both rotation and flip in a single 1–8 value.  The
+  /// mapping below is derived from the TIFF/EXIF spec:
+  ///   1 = identity              2 = flip H
+  ///   3 = 180° CW               4 = 180° CW + flip H
+  ///   5 = 270° CW + flip H      6 = 90° CW
+  ///   7 = 90° CW + flip H       8 = 270° CW
+  static func exifOrientation(rotationDegrees: Double, flipHorizontally: Bool) -> Int32 {
+    switch (Int(rotationDegrees.truncatingRemainder(dividingBy: 360)), flipHorizontally) {
+    case (90, false):  return 6
+    case (90, true):   return 7
+    case (180, false): return 3
+    case (180, true):  return 4
+    case (270, false): return 8
+    case (270, true):  return 5
+    case (0, true):    return 2
+    default:           return 1  // identity
+    }
   }
 
   static func centeredSquareCropRect(fullWidth: Double, fullHeight: Double) -> CGRect {
@@ -59,26 +83,30 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
       height: side)
   }
 
+  /// Applies an explicit rotation+flip transform to `rawData` using CoreImage,
+  /// then crops to a centered square.
+  ///
+  /// Rotation and flip are applied independently of any EXIF tag present in the
+  /// JPEG.  The raw sensor pixels (native landscape orientation from
+  /// `AVCapturePhotoOutput`) are used directly; no EXIF-based auto-rotation is
+  /// applied.  The caller is responsible for stripping residual EXIF orientation
+  /// tags after crop (via `rewriteImageData` or `clearJpegExifOrientation`).
   static func cropPhotoData(
     _ rawData: Data,
     ciContext: CIContext,
-    pixelsArePhysicallyRotated: Bool = false
+    rotationDegrees: Double = 0,
+    flipHorizontally: Bool = false
   ) -> (data: Data, fullExtent: CGRect, croppedExtent: CGRect)? {
-    // When the capture connection has already physically rotated the pixels
-    // (iOS 17+ with videoRotationAngle), any EXIF orientation tag is stale.
-    // Applying orientedCIImage would double-rotate onto already-correct pixels.
-    // Use CIImage(data:) directly so the crop is on the as-captured (correct)
-    // pixels.  The stale EXIF is stripped by rewriteImageData afterwards.
-    // On older OS paths EXIF has not been physically baked in, so we still
-    // need orientedCIImage to rotate the raw sensor pixels via the EXIF hint.
-    let ci: CIImage?
-    if pixelsArePhysicallyRotated {
-      ci = CIImage(data: rawData)
-    } else {
-      ci = orientedCIImage(from: rawData)
-    }
-    guard let ci = ci else {
+    // Always use the raw sensor pixels — no EXIF-based auto-orientation.
+    // We apply the explicit rotation+flip ourselves below so behaviour is
+    // independent of whether videoRotationAngle affected the photo connection.
+    guard var ci = CIImage(data: rawData) else {
       return nil
+    }
+
+    let exifOri = exifOrientation(rotationDegrees: rotationDegrees, flipHorizontally: flipHorizontally)
+    if exifOri != 1 {
+      ci = ci.oriented(forExifOrientation: exifOri)
     }
 
     let fullExtent = ci.extent
@@ -168,6 +196,34 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     return stripOrientationTagsLosslessly(data)
       ?? rewriteImageData(data, metadataSourceData: data)
       ?? data
+  }
+
+  /// Applies an explicit rotation+flip to `data`, strips EXIF orientation, and
+  /// returns the result.  Always uses raw sensor pixels (no EXIF auto-rotation).
+  static func normalizeWithExplicitTransform(
+    _ data: Data,
+    rotationDegrees: Double = 0,
+    flipHorizontally: Bool = false,
+    ciContext: CIContext? = nil
+  ) -> Data? {
+    let exifOri = exifOrientation(rotationDegrees: rotationDegrees, flipHorizontally: flipHorizontally)
+    guard exifOri != 1 else {
+      // Identity — just strip residual EXIF orientation tag if present.
+      return clearJpegExifOrientation(data)
+    }
+    guard var ci = CIImage(data: data) else {
+      return clearJpegExifOrientation(data)
+    }
+    ci = ci.oriented(forExifOrientation: exifOri)
+    let context = ciContext ?? CIContext()
+    guard let rotatedData = context.jpegRepresentation(
+      of: ci,
+      colorSpace: ci.colorSpace ?? CGColorSpaceCreateDeviceRGB())
+    else {
+      return clearJpegExifOrientation(data)
+    }
+    return rewriteImageData(rotatedData, metadataSourceData: data)
+      ?? clearJpegExifOrientation(rotatedData)
   }
 
   static func normalizePhotoDataRemovingExifOrientation(
@@ -311,23 +367,22 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
           NSLog("[SavePhotoDelegate] crop requested")
           if let cropped = SavePhotoDelegate.cropPhotoData(
             rawData, ciContext: ctx,
-            pixelsArePhysicallyRotated: strongSelf.pixelsArePhysicallyRotated) {
+            rotationDegrees: strongSelf.rotationDegrees,
+            flipHorizontally: strongSelf.flipHorizontally) {
             NSLog(
-              "[SavePhotoDelegate] crop applied: %.0fx%.0f -> %.0fx%.0f (%d bytes)",
+              "[SavePhotoDelegate] crop+transform applied: %.0fx%.0f -> %.0fx%.0f (%d bytes) rot=%.0f flipH=%d",
               cropped.fullExtent.width,
               cropped.fullExtent.height,
               cropped.croppedExtent.width,
               cropped.croppedExtent.height,
-              cropped.data.count)
+              cropped.data.count,
+              strongSelf.rotationDegrees,
+              strongSelf.flipHorizontally ? 1 : 0)
             finalData = SavePhotoDelegate.rewriteImageData(cropped.data, metadataSourceData: rawData)
               ?? SavePhotoDelegate.clearJpegExifOrientation(cropped.data)
           } else {
             NSLog("[SavePhotoDelegate] jpegRepresentation failed - using uncropped")
-            finalData = strongSelf.pixelsArePhysicallyRotated
-            ? SavePhotoDelegate.clearJpegExifOrientation(rawData)
-            : SavePhotoDelegate.normalizePhotoDataRemovingExifOrientation(
-              rawData,
-              ciContext: ctx)
+            finalData = SavePhotoDelegate.clearJpegExifOrientation(rawData)
           }
         } else if let rawData = rawData {
           NSLog(
@@ -335,11 +390,12 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             strongSelf.cropRect != nil ? "set" : "nil",
             strongSelf.ciContext != nil ? "set" : "nil",
             "set")
-          finalData = strongSelf.pixelsArePhysicallyRotated
-            ? SavePhotoDelegate.clearJpegExifOrientation(rawData)
-            : SavePhotoDelegate.normalizePhotoDataRemovingExifOrientation(
-              rawData,
-              ciContext: strongSelf.ciContext)
+          // No crop requested — apply rotation+flip then strip EXIF.
+          finalData = SavePhotoDelegate.normalizeWithExplicitTransform(
+            rawData,
+            rotationDegrees: strongSelf.rotationDegrees,
+            flipHorizontally: strongSelf.flipHorizontally,
+            ciContext: strongSelf.ciContext)
         } else {
           NSLog(
             "[SavePhotoDelegate] no crop: cropRect=%@, ciContext=%@, data=%@",
