@@ -59,16 +59,16 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   /// mapping below is derived from the TIFF/EXIF spec:
   ///   1 = identity              2 = flip H
   ///   3 = 180° CW               4 = 180° CW + flip H
-  ///   5 = 270° CW + flip H      6 = 90° CW
-  ///   7 = 90° CW + flip H       8 = 270° CW
+  ///   5 = 90° CW + flip H       6 = 90° CW
+  ///   7 = 270° CW + flip H      8 = 270° CW
   static func exifOrientation(rotationDegrees: Double, flipHorizontally: Bool) -> Int32 {
     switch (Int(rotationDegrees.truncatingRemainder(dividingBy: 360)), flipHorizontally) {
     case (90, false):  return 6
-    case (90, true):   return 7
+    case (90, true):   return 5
     case (180, false): return 3
     case (180, true):  return 4
     case (270, false): return 8
-    case (270, true):  return 5
+    case (270, true):  return 7
     case (0, true):    return 2
     default:           return 1  // identity
     }
