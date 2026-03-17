@@ -101,16 +101,73 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     return (croppedData, fullExtent, cropped.extent)
   }
 
+  /// Strips orientation tags from `data` without decoding or re-encoding pixels.
+  ///
+  /// Builds a fresh `CGMutableImageMetadata` that includes all sub-dictionary
+  /// metadata (EXIF, TIFF, GPS, IPTC, ExifAux) except the TIFF orientation tag,
+  /// then uses `CGImageDestinationCopyImageSource` to write a new JPEG whose
+  /// compressed image data is a byte-for-byte copy of the original. Returns
+  /// `nil` when the source cannot be parsed or the lossless copy fails.
+  private static func stripOrientationTagsLosslessly(_ data: Data) -> Data? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+      let imageType = CGImageSourceGetType(source),
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    else { return nil }
+
+    // Build replacement metadata from all recognised sub-dictionaries, omitting
+    // the orientation tag from the TIFF dict. kCGImageDestinationMergeMetadata
+    // is false so this completely replaces existing metadata — we must
+    // explicitly re-add every entry we want to keep.
+    let mutableMeta = CGImageMetadataCreateMutable()
+    let subDictKeys: [CFString] = [
+      kCGImagePropertyExifDictionary,
+      kCGImagePropertyTIFFDictionary,
+      kCGImagePropertyGPSDictionary,
+      kCGImagePropertyIPTCDictionary,
+      kCGImagePropertyExifAuxDictionary,
+    ]
+    let orientationKeyStrings: Set<String> = [
+      kCGImagePropertyTIFFOrientation as String,
+      "Orientation",
+    ]
+    for dictKey in subDictKeys {
+      guard let subDict = properties[dictKey] as? [CFString: Any] else { continue }
+      for (propKey, propValue) in subDict {
+        if dictKey == kCGImagePropertyTIFFDictionary,
+          orientationKeyStrings.contains(propKey as String)
+        { continue }
+        CGImageMetadataSetValueMatchingImageProperty(
+          mutableMeta, dictKey, propKey, propValue as AnyObject)
+      }
+    }
+
+    let output = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(output, imageType, 1, nil) else {
+      return nil
+    }
+
+    let options: [CFString: Any] = [
+      kCGImageDestinationMetadata: mutableMeta,
+      kCGImageDestinationMergeMetadata: false,
+    ]
+    var cfError: Unmanaged<CFError>?
+    guard
+      CGImageDestinationCopyImageSource(
+        destination, source, options as CFDictionary, &cfError),
+      cfError == nil
+    else { return nil }
+
+    return output as Data
+  }
+
   static func clearJpegExifOrientation(_ data: Data) -> Data {
-    guard isJpeg(data) else {
+    guard isJpeg(data), hasExifOrientation(data) else {
       return data
     }
 
-    guard hasExifOrientation(data) else {
-      return data
-    }
-
-    return rewriteImageData(data, metadataSourceData: data) ?? data
+    return stripOrientationTagsLosslessly(data)
+      ?? rewriteImageData(data, metadataSourceData: data)
+      ?? data
   }
 
   static func normalizePhotoDataRemovingExifOrientation(
@@ -178,6 +235,9 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     for (key, value) in properties where key != kCGImagePropertyOrientation {
       if value is [CFString: Any] || value is [String: Any] {
         metadata[key] = removingOrientationEntries(from: value)
+      } else {
+        // Preserve scalar values: DPI, color model, bit depth, pixel dimensions, etc.
+        metadata[key] = value
       }
     }
 
@@ -248,13 +308,7 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
           let ctx = strongSelf.ciContext,
           let rawData = rawData
         {
-          let ci = CIImage(data: rawData)?.oriented(.up)
-          let fullW = ci?.extent.width ?? 0
-          let fullH = ci?.extent.height ?? 0
-          NSLog(
-            "[SavePhotoDelegate] crop requested - extent=%.0fx%.0f",
-            fullW,
-            fullH)
+          NSLog("[SavePhotoDelegate] crop requested")
           if let cropped = SavePhotoDelegate.cropPhotoData(
             rawData, ciContext: ctx,
             pixelsArePhysicallyRotated: strongSelf.pixelsArePhysicallyRotated) {
