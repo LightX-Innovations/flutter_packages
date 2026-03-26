@@ -12,13 +12,35 @@ final class DefaultCamera: NSObject, Camera {
 
   var videoFormat: FourCharCode = kCVPixelFormatType_32BGRA {
     didSet {
+      let resolved = DefaultCamera.resolvedVideoFormat(
+        videoFormat, for: captureVideoOutput)
       captureVideoOutput.videoSettings = [
-        kCVPixelBufferPixelFormatTypeKey as String: videoFormat
+        kCVPixelBufferPixelFormatTypeKey as String: resolved
       ]
     }
   }
 
   private(set) var isPreviewPaused = false
+
+  /// Validates a requested pixel format against the output's supported list.
+  /// Falls back to BGRA, then YUV420 BiPlanar, then the first available type.
+  private static func resolvedVideoFormat(
+    _ requested: FourCharCode,
+    for output: CaptureVideoDataOutput
+  ) -> FourCharCode {
+    let available = output.availableVideoPixelFormatTypes
+    if available.isEmpty || available.contains(requested) {
+      return requested
+    }
+    let fallbacks: [FourCharCode] = [
+      kCVPixelFormatType_32BGRA,
+      kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+    ]
+    for fallback in fallbacks where available.contains(fallback) {
+      return fallback
+    }
+    return available.first ?? requested
+  }
 
   var minimumExposureOffset: CGFloat { CGFloat(captureDevice.minExposureTargetBias) }
   var maximumExposureOffset: CGFloat { CGFloat(captureDevice.maxExposureTargetBias) }
@@ -149,8 +171,9 @@ final class DefaultCamera: NSObject, Camera {
 
     // Setup video capture output.
     let captureVideoOutput = AVCaptureVideoDataOutput()
+    let resolvedFormat = resolvedVideoFormat(videoFormat, for: captureVideoOutput)
     captureVideoOutput.videoSettings = [
-      kCVPixelBufferPixelFormatTypeKey as String: videoFormat
+      kCVPixelBufferPixelFormatTypeKey as String: resolvedFormat
     ]
     captureVideoOutput.alwaysDiscardsLateVideoFrames = true
 
