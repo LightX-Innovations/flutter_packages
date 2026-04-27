@@ -29,6 +29,14 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   /// Whether to flip the captured photo horizontally after rotation.
   private let flipHorizontally: Bool
 
+  /// JPEG compression quality used by all CIContext.jpegRepresentation() calls.
+  /// 0.95 preserves near-lossless detail while keeping file sizes reasonable.
+  private static let jpegQuality: CGFloat = 0.95
+  private static var jpegOptions: [CIImageRepresentationOption: Any] {
+    [CIImageRepresentationOption(
+      rawValue: kCGImageDestinationLossyCompressionQuality as String): jpegQuality]
+  }
+
   var filePath: String {
     path
   }
@@ -121,7 +129,8 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
 
     guard let croppedData = ciContext.jpegRepresentation(
       of: cropped,
-      colorSpace: cropped.colorSpace ?? CGColorSpaceCreateDeviceRGB())
+      colorSpace: cropped.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+      options: Self.jpegOptions)
     else {
       return nil
     }
@@ -208,19 +217,21 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
   ) -> Data? {
     let exifOri = exifOrientation(rotationDegrees: rotationDegrees, flipHorizontally: flipHorizontally)
     guard exifOri != 1 else {
-      // Identity — just strip residual EXIF orientation tag if present.
-      return clearJpegExifOrientation(data)
+      // Identity — strip residual EXIF orientation and ensure JPEG output
+      // (the capture may be HEIF when Photonic Engine is active).
+      return ensureJpeg(clearJpegExifOrientation(data), ciContext: ciContext)
     }
     guard var ci = CIImage(data: data) else {
-      return clearJpegExifOrientation(data)
+      return ensureJpeg(clearJpegExifOrientation(data), ciContext: ciContext)
     }
     ci = ci.oriented(forExifOrientation: exifOri)
     let context = ciContext ?? CIContext()
     guard let rotatedData = context.jpegRepresentation(
       of: ci,
-      colorSpace: ci.colorSpace ?? CGColorSpaceCreateDeviceRGB())
+      colorSpace: ci.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+      options: Self.jpegOptions)
     else {
-      return clearJpegExifOrientation(data)
+      return ensureJpeg(clearJpegExifOrientation(data), ciContext: ciContext)
     }
     return rewriteImageData(rotatedData, metadataSourceData: data)
       ?? clearJpegExifOrientation(rotatedData)
@@ -241,7 +252,8 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     let context = ciContext ?? CIContext()
     guard let normalizedData = context.jpegRepresentation(
       of: ciImage,
-      colorSpace: ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB())
+      colorSpace: ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+      options: Self.jpegOptions)
     else {
       return clearJpegExifOrientation(data)
     }
@@ -252,6 +264,18 @@ class SavePhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
 
   private static func isJpeg(_ data: Data) -> Bool {
     return data.count > 2 && data[0] == 0xFF && data[1] == 0xD8
+  }
+
+  /// Convert non-JPEG data (e.g. HEIF from Photonic Engine capture) to JPEG.
+  /// Returns the input unchanged if it is already JPEG.
+  private static func ensureJpeg(_ data: Data, ciContext: CIContext? = nil) -> Data {
+    guard !isJpeg(data) else { return data }
+    guard let ci = CIImage(data: data) else { return data }
+    let context = ciContext ?? CIContext()
+    return context.jpegRepresentation(
+      of: ci,
+      colorSpace: ci.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+      options: jpegOptions) ?? data
   }
 
   private static func hasExifOrientation(_ data: Data) -> Bool {

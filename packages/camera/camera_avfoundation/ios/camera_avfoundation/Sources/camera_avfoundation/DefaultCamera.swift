@@ -12,35 +12,13 @@ final class DefaultCamera: NSObject, Camera {
 
   var videoFormat: FourCharCode = kCVPixelFormatType_32BGRA {
     didSet {
-      let resolved = DefaultCamera.resolvedVideoFormat(
-        videoFormat, for: captureVideoOutput)
       captureVideoOutput.videoSettings = [
-        kCVPixelBufferPixelFormatTypeKey as String: resolved
+        kCVPixelBufferPixelFormatTypeKey as String: videoFormat
       ]
     }
   }
 
   private(set) var isPreviewPaused = false
-
-  /// Validates a requested pixel format against the output's supported list.
-  /// Falls back to BGRA, then YUV420 BiPlanar, then the first available type.
-  private static func resolvedVideoFormat(
-    _ requested: FourCharCode,
-    for output: CaptureVideoDataOutput
-  ) -> FourCharCode {
-    let available = output.availableVideoPixelFormatTypes
-    if available.isEmpty || available.contains(requested) {
-      return requested
-    }
-    let fallbacks: [FourCharCode] = [
-      kCVPixelFormatType_32BGRA,
-      kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-    ]
-    for fallback in fallbacks where available.contains(fallback) {
-      return fallback
-    }
-    return available.first ?? requested
-  }
 
   var minimumExposureOffset: CGFloat { CGFloat(captureDevice.minExposureTargetBias) }
   var maximumExposureOffset: CGFloat { CGFloat(captureDevice.maxExposureTargetBias) }
@@ -171,9 +149,8 @@ final class DefaultCamera: NSObject, Camera {
 
     // Setup video capture output.
     let captureVideoOutput = AVCaptureVideoDataOutput()
-    let resolvedFormat = resolvedVideoFormat(videoFormat, for: captureVideoOutput)
     captureVideoOutput.videoSettings = [
-      kCVPixelBufferPixelFormatTypeKey as String: resolvedFormat
+      kCVPixelBufferPixelFormatTypeKey as String: videoFormat
     ]
     captureVideoOutput.alwaysDiscardsLateVideoFrames = true
 
@@ -741,23 +718,30 @@ final class DefaultCamera: NSObject, Camera {
   }
 
   func captureToFile(completion: @escaping (Result<String, any Error>) -> Void) {
-    var settings = AVCapturePhotoSettings()
+    let isHEVCCodecAvailable = capturePhotoOutput.availablePhotoCodecTypes.contains(
+      .hevc)
+
+    // Prefer HEVC capture when available so the ISP runs Apple's computational
+    // photography pipeline (Deep Fusion / Photonic Engine).  SavePhotoDelegate
+    // always converts to JPEG, so the on-disk format is .jpg unless the caller
+    // explicitly requested .heif.
+    var settings: AVCapturePhotoSettings
+    let fileExtension: String
+
+    if isHEVCCodecAvailable {
+      settings = AVCapturePhotoSettings(
+        format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+      fileExtension = fileFormat == .heif ? "heif" : "jpg"
+    } else {
+      settings = AVCapturePhotoSettings()
+      fileExtension = "jpg"
+    }
 
     if mediaSettings.resolutionPreset == .max {
       settings.isHighResolutionPhotoEnabled = true
     }
 
-    let fileExtension: String
-
-    let isHEVCCodecAvailable = capturePhotoOutput.availablePhotoCodecTypes.contains(
-      .hevc)
-
-    if fileFormat == .heif, isHEVCCodecAvailable {
-      settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
-      fileExtension = "heif"
-    } else {
-      fileExtension = "jpg"
-    }
+    settings.photoQualityPrioritization = .quality
 
     if flashMode != .torch {
       settings.flashMode = getAVCaptureFlashMode(for: flashMode)
