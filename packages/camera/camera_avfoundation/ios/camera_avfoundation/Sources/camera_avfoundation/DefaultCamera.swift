@@ -185,6 +185,7 @@ final class DefaultCamera: NSObject, Camera {
 
     capturePhotoOutput = AVCapturePhotoOutput()
     capturePhotoOutput.isHighResolutionCaptureEnabled = true
+    capturePhotoOutput.maxPhotoQualityPrioritization = .quality
 
     videoCaptureSession.automaticallyConfiguresApplicationAudioSession = false
     audioCaptureSession.automaticallyConfiguresApplicationAudioSession = false

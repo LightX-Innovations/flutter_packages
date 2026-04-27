@@ -56,6 +56,9 @@ protocol CapturePhotoOutput: CaptureOutput {
   /// Corresponds to the `isHighResolutionCaptureEnabled` property of `AVCapturePhotoOutput`
   var isHighResolutionCaptureEnabled: Bool { get set }
 
+  /// Corresponds to the `maxPhotoQualityPrioritization` property of `AVCapturePhotoOutput`
+  var maxPhotoQualityPrioritization: AVCapturePhotoOutput.QualityPrioritization { get set }
+
   /// Corresponds to the `supportedFlashModes` property of `AVCapturePhotoOutput`
   var supportedFlashModes: [AVCaptureDevice.FlashMode] { get }
 
