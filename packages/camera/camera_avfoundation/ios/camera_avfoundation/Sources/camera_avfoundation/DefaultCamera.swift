@@ -184,8 +184,11 @@ final class DefaultCamera: NSObject, Camera {
     flashMode = captureDevice.hasFlash ? .auto : .off
 
     capturePhotoOutput = AVCapturePhotoOutput()
-    capturePhotoOutput.isHighResolutionCaptureEnabled = true
-    capturePhotoOutput.maxPhotoQualityPrioritization = .quality
+    if #available(iOS 16.0, *) {
+      capturePhotoOutput.maxPhotoQualityPrioritization = .quality
+    } else {
+      capturePhotoOutput.isHighResolutionCaptureEnabled = true
+    }
 
     videoCaptureSession.automaticallyConfiguresApplicationAudioSession = false
     audioCaptureSession.automaticallyConfiguresApplicationAudioSession = false
@@ -705,7 +708,16 @@ final class DefaultCamera: NSObject, Camera {
 
       if strongSelf.videoWriter?.status == .completed {
         strongSelf.updateOrientation()
-        completion(.success(strongSelf.videoRecordingPath!))
+        guard let recordingPath = strongSelf.videoRecordingPath else {
+          completion(
+            .failure(
+              PigeonError(
+                code: "IOError",
+                message: "Video recording completed without output path.",
+                details: nil)))
+          return
+        }
+        completion(.success(recordingPath))
         strongSelf.videoRecordingPath = nil
       } else {
         completion(
@@ -719,8 +731,19 @@ final class DefaultCamera: NSObject, Camera {
   }
 
   func captureToFile(completion: @escaping (Result<String, any Error>) -> Void) {
+    NSLog("[LX-Camera] captureToFile: ENTER — session running=%d", videoCaptureSession.isRunning ? 1 : 0)
+
+    // Pre-flight: verify the capture session is still alive.
+    guard videoCaptureSession.isRunning else {
+      NSLog("[LX-Camera] captureToFile: ABORT — session not running")
+      completion(.failure(PigeonError(code: "SessionError", message: "Capture session is not running.", details: nil)))
+      return
+    }
+
     let isHEVCCodecAvailable = capturePhotoOutput.availablePhotoCodecTypes.contains(
       .hevc)
+
+    NSLog("[LX-Camera] captureToFile: HEVC=%d, preset=%@, flash=%d", isHEVCCodecAvailable ? 1 : 0, "\(mediaSettings.resolutionPreset)", flashMode.rawValue)
 
     // Prefer HEVC capture when available so the ISP runs Apple's computational
     // photography pipeline (Deep Fusion / Photonic Engine).  SavePhotoDelegate
@@ -738,8 +761,18 @@ final class DefaultCamera: NSObject, Camera {
       fileExtension = "jpg"
     }
 
+    // On iOS 16+ isHighResolutionPhotoEnabled is deprecated and can raise
+    // an NSException on newer devices. Use maxPhotoDimensions when available.
     if mediaSettings.resolutionPreset == .max {
-      settings.isHighResolutionPhotoEnabled = true
+      if #available(iOS 16.0, *) {
+        if let avOutput = capturePhotoOutput as? AVCapturePhotoOutput {
+          let maxDims = avOutput.maxPhotoDimensions
+          settings.maxPhotoDimensions = maxDims
+          NSLog("[LX-Camera] captureToFile: using maxPhotoDimensions %dx%d", maxDims.width, maxDims.height)
+        }
+      } else {
+        settings.isHighResolutionPhotoEnabled = true
+      }
     }
 
     settings.photoQualityPrioritization = .quality
@@ -748,6 +781,9 @@ final class DefaultCamera: NSObject, Camera {
       settings.flashMode = getAVCaptureFlashMode(for: flashMode)
     }
 
+    NSLog("[LX-Camera] captureToFile: settings created — uniqueID=%lld, flash=%ld, qualityPrioritization=%ld",
+          settings.uniqueID, settings.flashMode.rawValue, settings.photoQualityPrioritization.rawValue)
+
     let path: String
     do {
       path = try getTemporaryFilePath(
@@ -755,9 +791,12 @@ final class DefaultCamera: NSObject, Camera {
         subfolder: "pictures",
         prefix: "CAP_")
     } catch let error as NSError {
+      NSLog("[LX-Camera] captureToFile: temp path FAILED — %@", error.localizedDescription)
       completion(.failure(DefaultCamera.pigeonErrorFromNSError(error)))
       return
     }
+
+    NSLog("[LX-Camera] captureToFile: path=%@", path)
 
     let savePhotoDelegate = SavePhotoDelegate(
       path: path,
@@ -770,10 +809,21 @@ final class DefaultCamera: NSObject, Camera {
         }
 
         if let error = error {
+          NSLog("[LX-Camera] captureToFile: delegate error — %@", error.localizedDescription)
           completion(.failure(DefaultCamera.pigeonErrorFromNSError(error as NSError)))
         } else {
-          assert(path != nil, "Path must not be nil if no error.")
-          completion(.success(path!))
+          guard let savedPath = path else {
+            NSLog("[LX-Camera] captureToFile: delegate returned nil path")
+            completion(
+              .failure(
+                PigeonError(
+                  code: "IOError",
+                  message: "Photo capture completed without output path.",
+                  details: nil)))
+            return
+          }
+          NSLog("[LX-Camera] captureToFile: SUCCESS — %@", savedPath)
+          completion(.success(savedPath))
         }
       },
       cropRect: cameraTransform?.cropRect,
@@ -782,12 +832,17 @@ final class DefaultCamera: NSObject, Camera {
       flipHorizontally: cameraTransform?.flipHorizontally ?? false
     )
 
+    NSLog("[LX-Camera] captureToFile: about to call capturePhotoOutput.capturePhoto — output connections=%d",
+          capturePhotoOutput.avOutput.connections.count)
+
     assert(
       DispatchQueue.getSpecific(key: captureSessionQueueSpecificKey)
         == captureSessionQueueSpecificValue,
       "save photo delegate references must be updated on the capture session queue")
     inProgressSavePhotoDelegates[settings.uniqueID] = savePhotoDelegate
     capturePhotoOutput.capturePhoto(with: settings, delegate: savePhotoDelegate)
+
+    NSLog("[LX-Camera] captureToFile: capturePhoto returned (no NSException)")
   }
 
   private func getTemporaryFilePath(
@@ -1473,7 +1528,10 @@ final class DefaultCamera: NSObject, Camera {
       }
 
       if output == captureVideoOutput.avOutput {
-        let rawBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)!
+        guard let rawBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+          reportErrorMessage("Received video sample without image buffer while recording.")
+          return
+        }
         let nextSampleTime = CMTimeSubtract(sampleTime, recordingTimeOffset)
         if nextSampleTime > lastAppendedVideoSampleTime {
           // Apply crop transform to the recorded frame if needed.
@@ -1545,8 +1603,15 @@ final class DefaultCamera: NSObject, Camera {
         width = CVPixelBufferGetWidth(pixelBuffer)
       }
 
+      guard let planeAddress = planeAddress else {
+        CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly)
+        reportErrorMessage("Received camera image plane without base address.")
+        streamingPendingFramesCount -= 1
+        return
+      }
+
       let length = bytesPerRow * height
-      let bytes = Data(bytes: planeAddress!, count: length)
+      let bytes = Data(bytes: planeAddress, count: length)
 
       let planeBuffer = PlatformCameraImagePlane(
         bytes: FlutterStandardTypedData(bytes: bytes),
