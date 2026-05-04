@@ -5,53 +5,87 @@ cmake_minimum_required(VERSION 3.10)
 
 set(CMAKE_CXX_STANDARD 17)
 
-# Set variables
+# ---------------------------------------------------------------------------
+# Pylon SDK – architecture-aware setup
+#
+#   aarch64 (Jetson): downloaded automatically from the LightX GitHub release.
+#   x86_64  (dev PC): uses a locally installed pylon SDK.
+#                     Default search path: /opt/pylon
+#                     Override via:  cmake -DPYLON_INSTALL_DIR=/path/to/pylon ...
+#
+# To install pylon on x86_64 Arch/Garuda Linux:
+#   1. Download pylon 8.x Linux x86_64 .tar.gz from https://www.baslerweb.com/en/downloads/
+#   2. sudo mkdir -p /opt/pylon && sudo tar -xzf pylon-*.tar.gz -C /opt/pylon
+#   The official Basler installer also defaults to /opt/pylon.
+# ---------------------------------------------------------------------------
+
 set(PYLON_VERSION "8.0.2.16314")
-set(PYLON_ARCHIVE_NAME "pylon-${PYLON_VERSION}_linux-aarch64.tar.gz")
-set(PYLON_ARCHIVE_PATH ${CMAKE_BINARY_DIR}/downloads/${PYLON_ARCHIVE_NAME})
-set(PYLON_DOWNLOAD_URL "https://github.com/LightX-Innovations/flutter_packages/releases/download/camera_linux_v0.1/pylon-${PYLON_VERSION}_linux-aarch64.tar.gz")
-set(PYLON_ROOT ${CMAKE_BINARY_DIR}/pylon-sdk)
 
-set(PYLON_MPEG_ARCHIVE_NAME "pylon-supplementary-package-for-mpeg-4-1.0.2.121_aarch64.tar.gz")
-set(PYLON_MPEG_ARCHIVE_PATH ${CMAKE_BINARY_DIR}/downloads/${PYLON_MPEG_ARCHIVE_NAME})
-set(PYLON_MPEG_DOWNLOAD_URL "https://github.com/LightX-Innovations/flutter_packages/releases/download/camera_linux_v0.1/pylon-supplementary-package-for-mpeg-4-1.0.2.121_aarch64.tar.gz")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    # --- aarch64 (Jetson): auto-download from GitHub release ---
+    set(PYLON_ARCH "aarch64")
+    set(PYLON_ARCHIVE_NAME "pylon-${PYLON_VERSION}_linux-${PYLON_ARCH}.tar.gz")
+    set(PYLON_ARCHIVE_PATH ${CMAKE_BINARY_DIR}/downloads/${PYLON_ARCHIVE_NAME})
+    set(PYLON_DOWNLOAD_URL "https://github.com/LightX-Innovations/flutter_packages/releases/download/camera_linux_v0.1/pylon-${PYLON_VERSION}_linux-${PYLON_ARCH}.tar.gz")
+    set(PYLON_ROOT ${CMAKE_BINARY_DIR}/pylon-sdk)
 
-# Download the archives if they do not exist
-if(NOT EXISTS "${PYLON_ARCHIVE_PATH}")
-    message(STATUS "Downloading Pylon SDK archive...")
-    file(DOWNLOAD
-        "${PYLON_DOWNLOAD_URL}"
-        "${PYLON_ARCHIVE_PATH}"
-        SHOW_PROGRESS
-        STATUS DOWNLOAD_STATUS
-    )
-    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_RESULT)
-endif()
+    set(PYLON_MPEG_ARCHIVE_NAME "pylon-supplementary-package-for-mpeg-4-1.0.2.121_${PYLON_ARCH}.tar.gz")
+    set(PYLON_MPEG_ARCHIVE_PATH ${CMAKE_BINARY_DIR}/downloads/${PYLON_MPEG_ARCHIVE_NAME})
+    set(PYLON_MPEG_DOWNLOAD_URL "https://github.com/LightX-Innovations/flutter_packages/releases/download/camera_linux_v0.1/${PYLON_MPEG_ARCHIVE_NAME}")
 
-if(NOT EXISTS "${PYLON_MPEG_ARCHIVE_PATH}")
-    message(STATUS "Downloading Pylon SDK MPEG archive...")
-    file(DOWNLOAD
-        "${PYLON_MPEG_DOWNLOAD_URL}"
-        "${PYLON_MPEG_ARCHIVE_PATH}"
-        SHOW_PROGRESS
-        STATUS DOWNLOAD_STATUS
-    )
-    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_RESULT)
-endif()
+    if(NOT EXISTS "${PYLON_ARCHIVE_PATH}")
+        message(STATUS "Downloading Pylon SDK archive (${PYLON_ARCH})...")
+        file(DOWNLOAD
+            "${PYLON_DOWNLOAD_URL}"
+            "${PYLON_ARCHIVE_PATH}"
+            SHOW_PROGRESS
+            STATUS DOWNLOAD_STATUS
+        )
+        list(GET DOWNLOAD_STATUS 0 DOWNLOAD_RESULT)
+    endif()
 
+    if(NOT EXISTS "${PYLON_MPEG_ARCHIVE_PATH}")
+        message(STATUS "Downloading Pylon SDK MPEG archive (${PYLON_ARCH})...")
+        file(DOWNLOAD
+            "${PYLON_MPEG_DOWNLOAD_URL}"
+            "${PYLON_MPEG_ARCHIVE_PATH}"
+            SHOW_PROGRESS
+            STATUS DOWNLOAD_STATUS
+        )
+        list(GET DOWNLOAD_STATUS 0 DOWNLOAD_RESULT)
+    endif()
 
-if(NOT EXISTS "${PYLON_ROOT}")
-    message(STATUS "Extracting Pylon SDK to ${PYLON_ROOT}...")
-    file(MAKE_DIRECTORY "${PYLON_ROOT}")
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E tar -xzf "${PYLON_ARCHIVE_PATH}"
-        WORKING_DIRECTORY "${PYLON_ROOT}"
-    )
-    message(STATUS "Extracting Pylon MPEG SDK to ${PYLON_ROOT}...")
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E tar -xzf "${PYLON_MPEG_ARCHIVE_PATH}"
-        WORKING_DIRECTORY "${PYLON_ROOT}"
-    )
+    if(NOT EXISTS "${PYLON_ROOT}")
+        message(STATUS "Extracting Pylon SDK to ${PYLON_ROOT}...")
+        file(MAKE_DIRECTORY "${PYLON_ROOT}")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E tar -xzf "${PYLON_ARCHIVE_PATH}"
+            WORKING_DIRECTORY "${PYLON_ROOT}"
+        )
+        message(STATUS "Extracting Pylon MPEG SDK to ${PYLON_ROOT}...")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E tar -xzf "${PYLON_MPEG_ARCHIVE_PATH}"
+            WORKING_DIRECTORY "${PYLON_ROOT}"
+        )
+    endif()
+
+else()
+    # --- x86_64 (dev PC): use locally installed pylon ---
+    if(NOT DEFINED PYLON_INSTALL_DIR)
+        set(PYLON_INSTALL_DIR "/opt/pylon")
+    endif()
+
+    if(NOT EXISTS "${PYLON_INSTALL_DIR}/include/pylon/PylonIncludes.h")
+        message(FATAL_ERROR
+            "Pylon SDK not found at '${PYLON_INSTALL_DIR}'.\n"
+            "Install pylon for x86_64 from https://www.baslerweb.com/en/downloads/ "
+            "(extract to /opt/pylon), then re-run cmake.\n"
+            "Or pass -DPYLON_INSTALL_DIR=/your/path to cmake."
+        )
+    endif()
+
+    set(PYLON_ROOT "${PYLON_INSTALL_DIR}")
+    message(STATUS "Using locally installed Pylon SDK at ${PYLON_ROOT}")
 endif()
 
 include_directories(${PYLON_ROOT}/include)
@@ -117,9 +151,19 @@ target_link_libraries(${PLUGIN_NAME}
 find_package(PkgConfig REQUIRED)
 
 # --- OpenCV Integration ---
-find_package(OpenCV REQUIRED)
+# Exclude optional modules that pull in unavailable VTK/HDF5 system libs.
+find_package(OpenCV REQUIRED COMPONENTS
+    core imgproc highgui imgcodecs videoio calib3d features2d
+    objdetect photo stitching video ml flann)
 include_directories(${OpenCV_INCLUDE_DIRS})
-target_link_libraries(${PLUGIN_NAME} PRIVATE ${OpenCV_LIBS})
+# Filter out viz and hdf modules which require VTK and HDF5 (not needed here).
+set(_opencv_filtered_libs "")
+foreach(_lib ${OpenCV_LIBS})
+    if(NOT _lib MATCHES "opencv_viz|opencv_hdf")
+        list(APPEND _opencv_filtered_libs "${_lib}")
+    endif()
+endforeach()
+target_link_libraries(${PLUGIN_NAME} PRIVATE ${_opencv_filtered_libs})
 
 # List of absolute paths to libraries that should be bundled with the plugin.
 # This list could contain prebuilt libraries, or libraries created by an
