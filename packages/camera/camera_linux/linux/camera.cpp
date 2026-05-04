@@ -81,9 +81,22 @@ void Camera::setImageFormatGroup(
         break;
       case CameraLinuxPlatformImageFormatGroup::
           CAMERA_LINUX_PLATFORM_IMAGE_FORMAT_GROUP_RGB8:
-      default:
-        Pylon::CEnumParameter(nodemap, "PixelFormat").SetValue("RGB8");
+      default: {
+        // RGB8 is not supported by the pylon Camera Emulator or many GigE
+        // cameras. Try RGB8 first, fall back to BGR8 (supported by emulator).
+        auto pixelFormatParam =
+            Pylon::CEnumParameter(nodemap, "PixelFormat");
+        if (pixelFormatParam.CanSetValue("RGB8")) {
+          pixelFormatParam.SetValue("RGB8");
+        } else if (pixelFormatParam.CanSetValue("BGR8")) {
+          pixelFormatParam.SetValue("BGR8");
+        } else if (pixelFormatParam.CanSetValue("BayerRG8")) {
+          pixelFormatParam.SetValue("BayerRG8");
+        } else {
+          pixelFormatParam.SetValue("Mono8");
+        }
         break;
+      }
     }
   });
 }

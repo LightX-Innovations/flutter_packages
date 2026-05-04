@@ -171,33 +171,29 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
             children: [
               ElevatedButton(
                 onPressed: () {
-                  setState(() {
-                    if (TargetPlatform.linux != defaultTargetPlatform) {
-                      return;
-                    }
-                    final CameraLinux nativeCamera =
-                        CameraPlatform.instance as CameraLinux;
-                    nativeCamera.setImageFormatGroup(
-                      controller!.cameraId,
-                      PlatformImageFormatGroup.mono8,
-                    );
-                  });
+                  if (TargetPlatform.linux != defaultTargetPlatform) return;
+                  if (controller == null ||
+                      !controller!.value.isInitialized) return;
+                  final CameraLinux nativeCamera =
+                      CameraPlatform.instance as CameraLinux;
+                  nativeCamera.setImageFormatGroup(
+                    controller!.cameraId,
+                    PlatformImageFormatGroup.mono8,
+                  );
                 },
                 child: Text('mono8'),
               ),
               ElevatedButton(
                 onPressed: () {
-                  setState(() {
-                    if (TargetPlatform.linux != defaultTargetPlatform) {
-                      return;
-                    }
-                    final CameraLinux nativeCamera =
-                        CameraPlatform.instance as CameraLinux;
-                    nativeCamera.setImageFormatGroup(
-                      controller!.cameraId,
-                      PlatformImageFormatGroup.rgb8,
-                    );
-                  });
+                  if (TargetPlatform.linux != defaultTargetPlatform) return;
+                  if (controller == null ||
+                      !controller!.value.isInitialized) return;
+                  final CameraLinux nativeCamera =
+                      CameraPlatform.instance as CameraLinux;
+                  nativeCamera.setImageFormatGroup(
+                    controller!.cameraId,
+                    PlatformImageFormatGroup.rgb8,
+                  );
                 },
                 child: Text('rgb8'),
               ),
