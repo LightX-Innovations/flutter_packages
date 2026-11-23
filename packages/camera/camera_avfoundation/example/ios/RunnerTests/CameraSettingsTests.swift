@@ -222,6 +222,36 @@ final class CameraSettingsTests: XCTestCase {
     XCTAssertEqual(wrapper.capturedVideoSettings?[AVVideoHeightKey] as? Int, 1080)
   }
 
+  // LightX (APP-8060): recordings must be H.264 so browsers that cannot decode
+  // HEVC (e.g. Chrome on Linux) can play them in the web portal.
+  func testStartVideoRecording_recordsH264WhenHEVCIsRecommended() {
+    let wrapper = SquareCropWriterSettingsAVWrapper(
+      recommendedSettings: [
+        AVVideoCodecKey: AVVideoCodecType.hevc,
+        AVVideoWidthKey: 1920,
+        AVVideoHeightKey: 1080,
+        AVVideoCompressionPropertiesKey: [
+          AVVideoProfileLevelKey: "HEVC_Main_AutoLevel",
+          AVVideoAverageBitRateKey: 10_000_000,
+        ],
+      ])
+
+    let configuration = CameraTestUtils.createTestCameraConfiguration()
+    configuration.mediaSettingsWrapper = wrapper
+    let camera = CameraTestUtils.createTestCamera(configuration)
+
+    camera.startVideoRecording(completion: { _ in }, messengerForStreaming: nil)
+
+    XCTAssertEqual(
+      wrapper.capturedVideoSettings?[AVVideoCodecKey] as? AVVideoCodecType, .h264)
+    let compression =
+      wrapper.capturedVideoSettings?[AVVideoCompressionPropertiesKey] as? [String: Any]
+    XCTAssertNil(
+      compression?[AVVideoProfileLevelKey],
+      "An HEVC profile level must not reach an H.264 writer")
+    XCTAssertEqual(compression?[AVVideoAverageBitRateKey] as? Int, 10_000_000)
+  }
+
   func testSettings_ShouldBeSupportedByMethodCall() {
     let mockDevice = MockCaptureDevice()
     let mockSession = MockCaptureSession()
