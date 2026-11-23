@@ -602,6 +602,19 @@ final class DefaultCamera: NSObject, Camera {
       for: captureVideoOutput
     )
 
+    // LightX (APP-8060): always record H.264. Recent iPhones recommend HEVC,
+    // which browsers such as Chrome on Linux cannot decode, so the web portal
+    // could not play the clips. An HEVC profile level must not reach an H.264
+    // writer, so it is dropped; any other compression setting is kept.
+    videoSettings?[AVVideoCodecKey] = AVVideoCodecType.h264
+    if var compression = videoSettings?[AVVideoCompressionPropertiesKey] as? [String: Any],
+      let profile = compression[AVVideoProfileLevelKey] as? String,
+      profile.hasPrefix("HEVC")
+    {
+      compression.removeValue(forKey: AVVideoProfileLevelKey)
+      videoSettings?[AVVideoCompressionPropertiesKey] = compression
+    }
+
     if cameraTransform?.cropRect != nil,
       let origWidth = videoSettings?[AVVideoWidthKey] as? Int,
       let origHeight = videoSettings?[AVVideoHeightKey] as? Int

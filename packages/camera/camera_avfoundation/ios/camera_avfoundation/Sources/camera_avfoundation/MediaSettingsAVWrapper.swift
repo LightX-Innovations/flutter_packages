@@ -94,6 +94,9 @@ class FLTCamMediaSettingsAVWrapper {
     withFileType fileType: AVFileType,
     for output: CaptureVideoDataOutput
   ) -> [String: Any]? {
-    return output.avOutput.recommendedVideoSettingsForAssetWriter(writingTo: fileType)
+    // LightX (APP-8060): ask for the settings recommended for H.264, so the
+    // compression properties (profile, bitrate) match the codec the writer uses.
+    return output.avOutput.recommendedVideoSettings(
+      forVideoCodecType: .h264, assetWriterOutputFileType: fileType)
   }
 }

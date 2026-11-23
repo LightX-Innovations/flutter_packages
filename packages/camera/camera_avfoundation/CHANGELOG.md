@@ -1,3 +1,7 @@
+## 0.10.4
+
+* Records video in H.264 instead of the device-recommended codec (HEVC on recent iPhones), so browsers that cannot decode HEVC can play the clips (LightX APP-8060).
+
 ## 0.10.3
 
 * Fixes centered square crop behavior for photos, preview buffers, and recorded video when transform crop is enabled.
